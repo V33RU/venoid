@@ -1,0 +1,10 @@
+androguard>=3.4.0
+click>=8.0.0
+jinja2>=3.0.0
+rich>=13.0.0
+
+# Development dependencies
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+
