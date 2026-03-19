@@ -82,6 +82,7 @@ class IntentToWebViewRule(BaseRule):
     title = "Intent Data to WebView Load"
     severity = Severity.CRITICAL
     cwe = "CWE-939"
+    component_type = "webview"
     description = "User-controlled intent data flows to WebView.loadUrl(), enabling XSS or open redirects."
     remediation = "Validate and sanitize URL data before loading. Use HTTPS allowlists."
     references = [
@@ -266,6 +267,135 @@ class TapjackingVulnerabilityRule(BaseRule):
         return findings
 
 
+class FragmentInjectionRule(BaseRule):
+    """Detect fragment injection in PreferenceActivity subclasses - CWE-470."""
+
+    rule_id = "EXP-030"
+    title = "Fragment Injection via PreferenceActivity"
+    severity = Severity.HIGH
+    cwe = "CWE-470"
+    description = (
+        "Activity extends PreferenceActivity without overriding isValidFragment(), "
+        "allowing any caller to load arbitrary Fragment classes."
+    )
+    remediation = (
+        "Override isValidFragment() to return false for unknown fragment class names, "
+        "or migrate to PreferenceFragmentCompat."
+    )
+    references = [
+        "https://cwe.mitre.org/data/definitions/470.html",
+        "https://developer.android.com/reference/android/preference/PreferenceActivity#isValidFragment(java.lang.String)",
+    ]
+
+    def check(self) -> List[Finding]:
+        findings = []
+
+        if not self.callgraph:
+            return findings
+
+        # Find classes that extend PreferenceActivity
+        pref_activity_methods = self.callgraph.search_methods("PreferenceActivity")
+        is_valid_fragment_overrides = set(self.callgraph.search_methods("isValidFragment"))
+
+        for method_sig in pref_activity_methods:
+            # Extract class name from signature (format: "Lcom/pkg/Class;->method()")
+            class_name = method_sig.split("->")[0] if "->" in method_sig else ""
+            if not class_name:
+                continue
+
+            # Skip if this class overrides isValidFragment
+            has_override = any(class_name in s for s in is_valid_fragment_overrides)
+            if has_override:
+                continue
+
+            # Check if this class is an exported activity
+            activities = self.apk_parser.get_activities()
+            dalvik_name = class_name.strip("L").replace("/", ".").rstrip(";")
+            for activity in activities:
+                if activity["name"] == dalvik_name and activity["exported"]:
+                    findings.append(self.create_finding(
+                        component_name=activity["name"],
+                        confidence=Confidence.LIKELY,
+                        exploit_commands=[
+                            f"adb shell am start -n {self.apk_parser.get_package_name()}/{activity['name']} "
+                            f"--es :android:show_fragment com.target.app.SensitiveFragment",
+                            f"adb shell am start -n {self.apk_parser.get_package_name()}/{activity['name']} "
+                            f"--es :android:show_fragment android.app.Fragment",
+                        ],
+                        exploit_scenario=(
+                            f"Any app can load arbitrary Fragment classes via "
+                            f"{activity['name']} without restriction."
+                        ),
+                        api_level_affected="API <= 28 (fixed in Android 9)",
+                    ))
+
+        return findings
+
+
+class InsecureWebResourceResponseRule(BaseRule):
+    """Detect shouldInterceptRequest returning arbitrary local files - CWE-73."""
+
+    rule_id = "EXP-031"
+    title = "Arbitrary File Read via WebResourceResponse"
+    severity = Severity.HIGH
+    cwe = "CWE-73"
+    component_type = "webview"
+    description = (
+        "WebViewClient.shouldInterceptRequest() returns local files based on "
+        "unvalidated URL input, allowing an attacker to read arbitrary app files."
+    )
+    remediation = (
+        "Validate the URL scheme and path in shouldInterceptRequest(). "
+        "Only serve files from a known safe directory and reject file:// schemes."
+    )
+    references = [
+        "https://cwe.mitre.org/data/definitions/73.html",
+        "https://github.com/OWASP/owasp-mstg/blob/master/Document/0x05h-Testing-Platform-Interaction.md",
+    ]
+
+    def check(self) -> List[Finding]:
+        findings = []
+
+        if not self.callgraph:
+            return findings
+
+        intercept_methods = self.callgraph.search_methods("shouldInterceptRequest")
+
+        for method_sig in intercept_methods:
+            # Check if this method also reads a file (openAsset / openFileInput / File)
+            callees = self.callgraph.get_callees(method_sig)
+            reads_file = any(
+                kw in callee for callee in callees
+                for kw in ("openAsset", "openFileInput", "FileInputStream", "openFile")
+            )
+            if not reads_file:
+                continue
+
+            class_name = method_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
+            findings.append(self.create_finding(
+                component_name=class_name or "WebViewClient",
+                confidence=Confidence.LIKELY,
+                code_snippet=(
+                    "@Override\n"
+                    "public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {\n"
+                    "    // Returns local file based on request URL — validate path!\n"
+                    "}"
+                ),
+                exploit_commands=[
+                    "# Load a malicious URL in the app's WebView that triggers file read",
+                    "adb shell am start -a android.intent.action.VIEW "
+                    "-d 'target-scheme://path?file=../../../../shared_prefs/secrets.xml'",
+                ],
+                exploit_scenario=(
+                    "Attacker loads a crafted URL in the WebView causing "
+                    "shouldInterceptRequest to serve an arbitrary local file."
+                ),
+                api_level_affected="All",
+            ))
+
+        return findings
+
+
 class JavaScriptBridgeRule(BaseRule):
     """Detect insecure JavaScript bridge in WebView."""
 
@@ -273,6 +403,7 @@ class JavaScriptBridgeRule(BaseRule):
     title = "Insecure WebView JavaScript Bridge"
     severity = Severity.HIGH
     cwe = "CWE-749"
+    component_type = "webview"
     description = "WebView has JavaScript enabled with exposed bridge allowing code execution."
 
     def check(self) -> List[Finding]:
