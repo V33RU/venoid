@@ -78,9 +78,19 @@ class BaseRule(ABC):
         "android.",
         "com.google.android.",
         "com.google.firebase.",
+        "com.google.gms.",
         "com.facebook.",
         "com.bumptech.",
         "com.evernote.",
+        "com.microsoft.",
+        "com.huawei.",
+        "com.appsflyer.",
+        "com.adjust.",
+        "com.braze.",
+        "com.onesignal.",
+        "com.mixpanel.",
+        "com.amplitude.",
+        "io.branch.",
         "okhttp3.",
         "retrofit2.",
         "io.reactivex.",
@@ -88,6 +98,8 @@ class BaseRule(ABC):
         "com.jakewharton.",
         "io.fabric.",
         "com.crashlytics.",
+        "com.newrelic.",
+        "com.datadog.",
     )
 
     def __init__(self, apk_parser: Any, callgraph: Any, taint_engine: Any) -> None:
