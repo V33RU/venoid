@@ -12,6 +12,7 @@ class DeepLinkAutoVerifyRule(BaseRule):
     title = "Deep Link Without autoVerify"
     severity = Severity.MEDIUM
     cwe = "CWE-345"
+    component_type = "deeplink"
     description = "Intent filter handles custom scheme without android:autoVerify=\"true\", enabling phishing via link hijacking."
     remediation = "Set android:autoVerify=\"true\" for all intent filters handling https:// or use App Links."
     references = [
@@ -25,6 +26,8 @@ class DeepLinkAutoVerifyRule(BaseRule):
         activities = self.apk_parser.get_activities()
 
         for activity in activities:
+            if self._is_third_party_component(activity['name']):
+                continue
             for intent_filter in activity.get('intent_filters', []):
                 schemes = [d.get('scheme', '') for d in intent_filter.get('data', [])]
 
@@ -62,6 +65,7 @@ class DeepLinkOpenRedirectRule(BaseRule):
     title = "Deep Link Open Redirect"
     severity = Severity.MEDIUM
     cwe = "CWE-601"
+    component_type = "deeplink"
     description = "Deep link parameter flows directly to startActivity() without validation, enabling open redirects."
     remediation = "Validate redirect URLs against an allowlist. Reject arbitrary external redirects."
     references = [
@@ -79,6 +83,8 @@ class DeepLinkOpenRedirectRule(BaseRule):
         activities = self.apk_parser.get_activities()
 
         for activity in activities:
+            if self._is_third_party_component(activity['name']):
+                continue
             # Check for deep link handling with URL parameter
             has_deep_link = False
             for intent_filter in activity.get('intent_filters', []):
@@ -125,6 +131,7 @@ class CustomSchemeHijackingRule(BaseRule):
     title = "Custom URL Scheme Hijacking"
     severity = Severity.MEDIUM
     cwe = "CWE-346"
+    component_type = "deeplink"
     description = "App registers custom URL scheme (e.g., myapp://) without verification, allowing other apps to intercept."
     remediation = "Use App Links with autoVerify. Avoid custom schemes for sensitive operations."
     references = [
@@ -140,6 +147,8 @@ class CustomSchemeHijackingRule(BaseRule):
         common_schemes = ['http', 'https', 'file', 'content', 'javascript']
 
         for activity in activities:
+            if self._is_third_party_component(activity['name']):
+                continue
             for intent_filter in activity.get('intent_filters', []):
                 data_specs = intent_filter.get('data', [])
 
