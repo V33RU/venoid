@@ -28,6 +28,10 @@ class ExportedReceiverRule(BaseRule):
             if not receiver['exported']:
                 continue
 
+            # Skip known third-party SDK receivers — they are legitimately exported
+            if self._is_third_party_component(receiver['name']):
+                continue
+
             # Check if protected by signature-level permission
             if self._is_protected(receiver.get('permission')):
                 continue
