@@ -63,12 +63,32 @@ class BaseRule(ABC):
     description: str = ""
     remediation: str = ""
     references: List[str] = []
+    component_type: str = ""   # set explicitly on each rule; fallback infers from class name
 
     # Common dangerous sinks shared by injection-detection rules
     DANGEROUS_SINKS: List[str] = [
         "exec(", "rawQuery", "execSQL", "loadUrl", "openFile",
         "sendBroadcast", "startActivity",
     ]
+
+    # Known third-party SDK package prefixes — components from these are
+    # legitimately exported by the SDK and should not be flagged as app bugs.
+    THIRD_PARTY_PREFIXES: tuple = (
+        "androidx.",
+        "android.",
+        "com.google.android.",
+        "com.google.firebase.",
+        "com.facebook.",
+        "com.bumptech.",
+        "com.evernote.",
+        "okhttp3.",
+        "retrofit2.",
+        "io.reactivex.",
+        "com.squareup.",
+        "com.jakewharton.",
+        "io.fabric.",
+        "com.crashlytics.",
+    )
 
     def __init__(self, apk_parser: Any, callgraph: Any, taint_engine: Any) -> None:
         """Initialize rule with analysis components.
@@ -141,7 +161,9 @@ class BaseRule(ABC):
         )
 
     def _get_component_type(self) -> str:
-        """Get component type based on rule class name."""
+        """Get component type — uses explicit class attribute if set, otherwise infers from class name."""
+        if self.component_type:
+            return self.component_type
         class_name = self.__class__.__name__.lower()
         if "activity" in class_name:
             return "activity"
@@ -189,6 +211,14 @@ class BaseRule(ABC):
         if manifest is None:
             return None
         return manifest.find(".//application")
+
+    def _is_third_party_component(self, component_name: str) -> bool:
+        """Return True if the component belongs to a known third-party SDK.
+
+        These components are intentionally exported by their SDK and flagging
+        them as vulnerabilities produces false positives.
+        """
+        return component_name.startswith(self.THIRD_PARTY_PREFIXES)
 
     def _is_protected(self, permission: Optional[str]) -> bool:
         """Check if a permission provides adequate protection.
