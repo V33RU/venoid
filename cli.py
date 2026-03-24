@@ -3,6 +3,8 @@
 import rich_click as click
 import json
 import logging
+import subprocess
+import platform
 
 click.rich_click.USE_RICH_MARKUP = True
 click.rich_click.USE_MARKDOWN = False
@@ -16,7 +18,7 @@ click.rich_click.COMMAND_GROUPS = {
     "cli.py": [
         {
             "name": "Commands",
-            "commands": ["scan"],
+            "commands": ["scan", "rules"],
         }
     ]
 }
@@ -45,12 +47,13 @@ from rules.activities import (
     ExportedActivityRule, IntentToWebViewRule, NestedIntentForwardingRule,
     TaskHijackingRule, TapjackingVulnerabilityRule, JavaScriptBridgeRule,
     FragmentInjectionRule, InsecureWebResourceResponseRule,
+    WebViewFileAccessRule, IntentRedirectionRule,
 )
 from rules.services import ExportedServiceRule, ServiceIntentInjectionRule
 from rules.receivers import ExportedReceiverRule, DynamicReceiverRule, ReceiverInjectionRule
 from rules.providers import (
     ExportedProviderRule, ProviderSQLInjectionRule, ProviderPathTraversalRule,
-    GrantUriPermissionsRule, TypoPermissionRule,
+    GrantUriPermissionsRule, TypoPermissionRule, FileProviderBroadPathsRule,
 )
 from rules.deeplinks import DeepLinkAutoVerifyRule, DeepLinkOpenRedirectRule, CustomSchemeHijackingRule
 from rules.manifest_rules import (
@@ -77,6 +80,43 @@ _SEV_COLOR = {
     Severity.INFO:     "blue",
 }
 
+# All rule classes with their category, used by both `scan` and `rules` commands
+_ALL_RULE_CLASSES = [
+    ("activities", ExportedActivityRule),
+    ("activities", IntentToWebViewRule),
+    ("activities", NestedIntentForwardingRule),
+    ("activities", TaskHijackingRule),
+    ("activities", TapjackingVulnerabilityRule),
+    ("activities", JavaScriptBridgeRule),
+    ("activities", FragmentInjectionRule),
+    ("activities", InsecureWebResourceResponseRule),
+    ("activities", WebViewFileAccessRule),
+    ("activities", IntentRedirectionRule),
+    ("services",   ExportedServiceRule),
+    ("services",   ServiceIntentInjectionRule),
+    ("receivers",  ExportedReceiverRule),
+    ("receivers",  DynamicReceiverRule),
+    ("receivers",  ReceiverInjectionRule),
+    ("providers",  ExportedProviderRule),
+    ("providers",  ProviderSQLInjectionRule),
+    ("providers",  ProviderPathTraversalRule),
+    ("providers",  GrantUriPermissionsRule),
+    ("providers",  TypoPermissionRule),
+    ("providers",  FileProviderBroadPathsRule),
+    ("deeplinks",  DeepLinkAutoVerifyRule),
+    ("deeplinks",  DeepLinkOpenRedirectRule),
+    ("deeplinks",  CustomSchemeHijackingRule),
+    ("manifest",   InsecureNetworkConfigRule),
+    ("manifest",   DebugModeEnabledRule),
+    ("manifest",   BackupEnabledRule),
+    ("manifest",   PendingIntentVulnerabilityRule),
+    ("crypto",     HardcodedCryptoKeyRule),
+    ("crypto",     InsecureRandomRule),
+    ("storage",    InsecureLoggingRule),
+    ("storage",    DynamicCodeLoadingRule),
+    ("storage",    SecureScreenFlagRule),
+]
+
 
 def _silence_libs(verbose: bool) -> None:
     """Suppress noisy third-party loggers unless verbose."""
@@ -98,62 +138,35 @@ def _silence_libs(verbose: bool) -> None:
         pass
 
 
+def _open_in_browser(path: Path) -> None:
+    """Open a file in the default browser, cross-platform."""
+    try:
+        if platform.system() == "Darwin":
+            subprocess.Popen(["open", str(path)])
+        elif platform.system() == "Windows":
+            subprocess.Popen(["start", str(path)], shell=True)
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception:
+        pass
+
+
 def get_all_rules(apk_parser, callgraph, taint_engine, components: Optional[str] = None) -> List:
     """Get rule instances, optionally filtered by component type."""
     active = {c.strip().lower() for c in components.split(',')} if components else None
 
-    def include(t: str) -> bool:
-        return active is None or t in active
+    # manifest/crypto/storage rules always run when no filter is set
+    always_run = {"manifest", "crypto", "storage"}
 
     rules = []
-    if include("activities"):
-        rules += [
-            ExportedActivityRule(apk_parser, callgraph, taint_engine),
-            IntentToWebViewRule(apk_parser, callgraph, taint_engine),
-            NestedIntentForwardingRule(apk_parser, callgraph, taint_engine),
-            TaskHijackingRule(apk_parser, callgraph, taint_engine),
-            TapjackingVulnerabilityRule(apk_parser, callgraph, taint_engine),
-            JavaScriptBridgeRule(apk_parser, callgraph, taint_engine),
-            FragmentInjectionRule(apk_parser, callgraph, taint_engine),
-            InsecureWebResourceResponseRule(apk_parser, callgraph, taint_engine),
-        ]
-    if include("services"):
-        rules += [
-            ExportedServiceRule(apk_parser, callgraph, taint_engine),
-            ServiceIntentInjectionRule(apk_parser, callgraph, taint_engine),
-        ]
-    if include("receivers"):
-        rules += [
-            ExportedReceiverRule(apk_parser, callgraph, taint_engine),
-            DynamicReceiverRule(apk_parser, callgraph, taint_engine),
-            ReceiverInjectionRule(apk_parser, callgraph, taint_engine),
-        ]
-    if include("providers"):
-        rules += [
-            ExportedProviderRule(apk_parser, callgraph, taint_engine),
-            ProviderSQLInjectionRule(apk_parser, callgraph, taint_engine),
-            ProviderPathTraversalRule(apk_parser, callgraph, taint_engine),
-            GrantUriPermissionsRule(apk_parser, callgraph, taint_engine),
-            TypoPermissionRule(apk_parser, callgraph, taint_engine),
-        ]
-    if include("deeplinks"):
-        rules += [
-            DeepLinkAutoVerifyRule(apk_parser, callgraph, taint_engine),
-            DeepLinkOpenRedirectRule(apk_parser, callgraph, taint_engine),
-            CustomSchemeHijackingRule(apk_parser, callgraph, taint_engine),
-        ]
-    if active is None:
-        rules += [
-            InsecureNetworkConfigRule(apk_parser, callgraph, taint_engine),
-            DebugModeEnabledRule(apk_parser, callgraph, taint_engine),
-            BackupEnabledRule(apk_parser, callgraph, taint_engine),
-            PendingIntentVulnerabilityRule(apk_parser, callgraph, taint_engine),
-            HardcodedCryptoKeyRule(apk_parser, callgraph, taint_engine),
-            InsecureRandomRule(apk_parser, callgraph, taint_engine),
-            InsecureLoggingRule(apk_parser, callgraph, taint_engine),
-            DynamicCodeLoadingRule(apk_parser, callgraph, taint_engine),
-            SecureScreenFlagRule(apk_parser, callgraph, taint_engine),
-        ]
+    for category, cls in _ALL_RULE_CLASSES:
+        if active is None:
+            rules.append(cls(apk_parser, callgraph, taint_engine))
+        elif category in active:
+            rules.append(cls(apk_parser, callgraph, taint_engine))
+        elif category in always_run and active.isdisjoint(always_run):
+            # only include always-run categories when no component filter touches them
+            rules.append(cls(apk_parser, callgraph, taint_engine))
     return rules
 
 
@@ -169,9 +182,57 @@ def cli() -> None:
     \b
     Quick start:
       python3 cli.py scan app.apk
-      python3 cli.py scan app.apk --help
+      python3 cli.py rules
     """
     pass
+
+
+@cli.command(name="rules")
+@click.option('--category', '-c', default=None,
+              help='Filter by category (activities, services, receivers, providers, deeplinks, manifest, crypto, storage).')
+def list_rules(category: Optional[str]) -> None:
+    """List all available detection rules.
+
+    \b
+    Examples:
+      python3 cli.py rules
+      python3 cli.py rules --category deeplinks
+    """
+    console.print()
+    console.print(Panel(
+        "[bold white]ExPoser[/bold white] [dim]v1.0.0[/dim]  ·  Available Detection Rules",
+        border_style="bright_blue",
+        padding=(0, 2),
+    ))
+    console.print()
+
+    table = Table(show_header=True, header_style="bold dim", border_style="dim", padding=(0, 1))
+    table.add_column("ID",       style="cyan",    no_wrap=True, width=10)
+    table.add_column("Severity", no_wrap=True,    width=10)
+    table.add_column("Category", style="dim",     width=12)
+    table.add_column("CWE",      style="dim",     width=10)
+    table.add_column("Title",    no_wrap=False)
+
+    cat_filter = category.lower() if category else None
+    count = 0
+    for cat, cls in _ALL_RULE_CLASSES:
+        if cat_filter and cat != cat_filter:
+            continue
+        sev = cls.severity
+        color = _SEV_COLOR.get(sev, "white")
+        table.add_row(
+            cls.rule_id,
+            Text(sev.value, style=color),
+            cat,
+            cls.cwe,
+            cls.title,
+        )
+        count += 1
+
+    console.print(table)
+    console.print()
+    console.print(f"[dim]{count} rule(s) shown.  Run [cyan]python3 cli.py scan app.apk[/cyan] to use them.[/dim]")
+    console.print()
 
 
 @cli.command()
@@ -183,6 +244,8 @@ def cli() -> None:
 @click.option('--severity', '-s', default='MEDIUM,HIGH,CRITICAL',
               help='Comma-separated severity filter.  [default: MEDIUM,HIGH,CRITICAL]',
               metavar='LEVELS')
+@click.option('--all', '-a', 'scan_all', is_flag=True,
+              help='Show all findings (overrides --severity and --min-confidence).')
 @click.option('--min-confidence', '-c', default='LIKELY',
               type=click.Choice(['CONFIRMED', 'LIKELY', 'POSSIBLE'], case_sensitive=False),
               help='Minimum confidence to include.  [default: LIKELY]')
@@ -193,6 +256,10 @@ def cli() -> None:
                    'Default: all')
 @click.option('--exploit-hints', '-e', is_flag=True,
               help='Attach ADB / Frida / drozer commands to each finding.')
+@click.option('--open', '-O', 'open_report', is_flag=True,
+              help='Auto-open the HTML report in browser after scan.')
+@click.option('--show-findings', '-f', is_flag=True,
+              help='Print a findings table directly in the terminal.')
 @click.option('--jadx-path', default='jadx',
               metavar='PATH',
               help='Path to jadx binary for source-level decompilation.  [default: jadx]')
@@ -204,9 +271,12 @@ def scan(
     apk_path: Path,
     output: tuple,
     severity: str,
+    scan_all: bool,
     min_confidence: str,
     components: Optional[str],
     exploit_hints: bool,
+    open_report: bool,
+    show_findings: bool,
     jadx_path: str,
     output_dir: Path,
     verbose: bool,
@@ -216,14 +286,21 @@ def scan(
     \b
     Examples:
       python3 cli.py scan app.apk
+      python3 cli.py scan app.apk --all --open
       python3 cli.py scan app.apk -o html -o json -e -s CRITICAL,HIGH
       python3 cli.py scan app.apk -t activities,deeplinks -c POSSIBLE -d ./reports
+      python3 cli.py scan app.apk --show-findings
     """
     _silence_libs(verbose)
     logger = logging.getLogger(__name__)
 
-    severity_levels = [s.strip().upper() for s in severity.split(',')]
-    min_conf_enum = Confidence[min_confidence.upper()]
+    # --all overrides severity and confidence filters
+    if scan_all:
+        severity_levels = [s.value for s in Severity]
+        min_conf_enum = Confidence.POSSIBLE
+    else:
+        severity_levels = [s.strip().upper() for s in severity.split(',')]
+        min_conf_enum = Confidence[min_confidence.upper()]
 
     # ── Header ────────────────────────────────────────────────────────────────
     console.print()
@@ -367,7 +444,50 @@ def scan(
         padding=(1, 2),
     ))
 
-    # Saved reports
+    # ── Hidden findings warning ────────────────────────────────────────────────
+    hidden = len(all_findings) - len(filtered)
+    if hidden > 0 and not scan_all:
+        hidden_sevs = sorted({
+            f.severity.value for f in all_findings
+            if f.severity.value not in severity_levels
+        })
+        hint = ", ".join(hidden_sevs) if hidden_sevs else "lower severity"
+        console.print(
+            f"\n[yellow]⚠  {hidden} finding(s) hidden by current filters "
+            f"({hint}).  Run with [bold]-a[/bold] / [bold]--all[/bold] to see everything.[/yellow]"
+        )
+
+    # ── No findings message ────────────────────────────────────────────────────
+    if len(filtered) == 0:
+        console.print()
+        console.print("[dim]  No findings matched the current filters.[/dim]")
+        if hidden > 0:
+            console.print(f"[dim]  Tip: try [cyan]--all[/cyan] to bypass severity and confidence filters.[/dim]")
+
+    # ── Inline findings table ──────────────────────────────────────────────────
+    if show_findings and filtered:
+        console.print()
+        console.print(Rule("[dim]Findings[/dim]", style="dim"))
+        ftable = Table(show_header=True, header_style="bold dim",
+                       border_style="dim", padding=(0, 1), expand=True)
+        ftable.add_column("Severity",   no_wrap=True, width=10)
+        ftable.add_column("Confidence", no_wrap=True, width=11)
+        ftable.add_column("Rule",       no_wrap=True, width=10)
+        ftable.add_column("Component",  no_wrap=False)
+        ftable.add_column("Title",      no_wrap=False)
+        for f in sorted(filtered,
+                        key=lambda x: list(Severity).index(x.severity)):
+            color = _SEV_COLOR.get(f.severity, "white")
+            ftable.add_row(
+                Text(f.severity.value, style=color),
+                Text(f.confidence.value, style="dim"),
+                f.rule_id,
+                f.component_name.split('.')[-1],   # short name for readability
+                f.title,
+            )
+        console.print(ftable)
+
+    # ── Saved reports ──────────────────────────────────────────────────────────
     if saved:
         console.print()
         console.print(Rule("[dim]Reports[/dim]", style="dim"))
@@ -376,7 +496,14 @@ def scan(
             t.append(str(path), style=f"cyan link file://{path.resolve()}")
             console.print(t)
 
-    # Critical warning
+    # ── Auto-open HTML report ──────────────────────────────────────────────────
+    if open_report:
+        for path in saved:
+            if str(path).endswith('.html'):
+                _open_in_browser(path)
+                console.print(f"[dim]  Opened {path.name} in browser.[/dim]")
+
+    # ── Critical warning ───────────────────────────────────────────────────────
     critical_count = sev_counts.get(Severity.CRITICAL, 0)
     if critical_count:
         console.print()
