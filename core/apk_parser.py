@@ -217,10 +217,13 @@ class APKParser:
                             if cat_name:
                                 filter_data['categories'].append(cat_name)
                         for data in intent_filter.findall('.//data'):
+                            spec = {}
                             for attr in ['scheme', 'host', 'path', 'pathPrefix', 'pathPattern']:
                                 val = data.get(f'{{{ANDROID_NS}}}{attr}')
                                 if val:
-                                    filter_data['data'].append({attr: val})
+                                    spec[attr] = val
+                            if spec:
+                                filter_data['data'].append(spec)
                         filters.append(filter_data)
         return filters
 
