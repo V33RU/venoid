@@ -318,3 +318,65 @@ class APKParser:
             if elem_name == name or elem_name.endswith(name.split('.')[-1]):
                 return elem.get(f'{{{ns}}}{attribute}')
         return None
+
+    def get_file_provider_paths(self, provider_name: str) -> Optional[bytes]:
+        """Return the raw bytes of the FileProvider paths XML for *provider_name*.
+
+        Looks for a <meta-data android:name="android.support.FILE_PROVIDER_PATHS">
+        element inside the provider declaration and tries to read the referenced
+        XML resource file from the APK.  Falls back to scanning common file names.
+
+        Returns:
+            Raw XML bytes if found, else None.
+        """
+        if not self.apk:
+            return None
+
+        xml = self.get_android_manifest_xml()
+        if xml is None:
+            return None
+
+        ns = ANDROID_NS
+        resource_file: Optional[str] = None
+
+        # Locate the provider element and its FILE_PROVIDER_PATHS meta-data
+        for elem in xml.iter("provider"):
+            elem_name = elem.get(f"{{{ns}}}name", "")
+            if elem_name != provider_name and not elem_name.endswith(provider_name.split(".")[-1]):
+                continue
+            for meta in elem.findall("meta-data"):
+                meta_name = meta.get(f"{{{ns}}}name", "")
+                if "FILE_PROVIDER_PATHS" in meta_name or meta_name in (
+                    "android.support.FILE_PROVIDER_PATHS",
+                    "androidx.core.content.FileProvider",
+                ):
+                    resource_val = meta.get(f"{{{ns}}}resource", "")
+                    # resource_val is "@xml/something" or a compiled resource int
+                    if resource_val.startswith("@xml/"):
+                        resource_file = "res/xml/" + resource_val[len("@xml/"):] + ".xml"
+                    elif resource_val.startswith("@"):
+                        # Compiled resource — try common names below
+                        pass
+            break
+
+        # Try the resolved name first, then fall back to common guesses
+        candidates = []
+        if resource_file:
+            candidates.append(resource_file)
+        candidates.extend([
+            "res/xml/file_paths.xml",
+            "res/xml/provider_paths.xml",
+            "res/xml/filepaths.xml",
+            "res/xml/paths.xml",
+            "res/xml/file_provider_paths.xml",
+        ])
+
+        for candidate in candidates:
+            try:
+                data = self.apk.get_file(candidate)
+                if data:
+                    return data
+            except Exception:
+                continue
+
+        return None
