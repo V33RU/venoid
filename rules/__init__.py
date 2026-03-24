@@ -3,11 +3,12 @@
 from .base_rule import BaseRule, Finding, Severity, Confidence
 from .activities import (
     ExportedActivityRule, IntentToWebViewRule, NestedIntentForwardingRule,
-    TaskHijackingRule, TapjackingVulnerabilityRule, JavaScriptBridgeRule
+    TaskHijackingRule, TapjackingVulnerabilityRule, JavaScriptBridgeRule,
+    WebViewFileAccessRule, IntentRedirectionRule,
 )
 from .services import ExportedServiceRule, ServiceIntentInjectionRule
 from .receivers import ExportedReceiverRule, DynamicReceiverRule, ReceiverInjectionRule
-from .providers import ExportedProviderRule, ProviderSQLInjectionRule, ProviderPathTraversalRule, GrantUriPermissionsRule
+from .providers import ExportedProviderRule, ProviderSQLInjectionRule, ProviderPathTraversalRule, GrantUriPermissionsRule, FileProviderBroadPathsRule
 from .deeplinks import DeepLinkAutoVerifyRule, DeepLinkOpenRedirectRule, CustomSchemeHijackingRule
 from .manifest_rules import (
     InsecureNetworkConfigRule, DebugModeEnabledRule,
@@ -20,12 +21,14 @@ __all__ = [
     # Activity rules
     "ExportedActivityRule", "IntentToWebViewRule", "NestedIntentForwardingRule",
     "TaskHijackingRule", "TapjackingVulnerabilityRule", "JavaScriptBridgeRule",
+    "WebViewFileAccessRule", "IntentRedirectionRule",
     # Service rules
     "ExportedServiceRule", "ServiceIntentInjectionRule",
     # Receiver rules
     "ExportedReceiverRule", "DynamicReceiverRule", "ReceiverInjectionRule",
     # Provider rules
     "ExportedProviderRule", "ProviderSQLInjectionRule", "ProviderPathTraversalRule", "GrantUriPermissionsRule",
+    "FileProviderBroadPathsRule",
     # Deep link rules
     "DeepLinkAutoVerifyRule", "DeepLinkOpenRedirectRule", "CustomSchemeHijackingRule",
     # Manifest/config rules
