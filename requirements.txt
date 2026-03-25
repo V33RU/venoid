@@ -2,6 +2,7 @@ androguard>=3.4.0
 click>=8.0.0
 jinja2>=3.0.0
 rich>=13.0.0
+rich_click>=1.9.7
 
 # Development dependencies
 pytest>=7.0.0
