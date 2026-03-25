@@ -62,14 +62,14 @@ class BaseRule(ABC):
     cwe: str = ""
     description: str = ""
     remediation: str = ""
-    references: List[str] = []
+    references: tuple = ()  # tuple avoids mutable class-level default
     component_type: str = ""   # set explicitly on each rule; fallback infers from class name
 
-    # Common dangerous sinks shared by injection-detection rules
-    DANGEROUS_SINKS: List[str] = [
+    # Common dangerous sinks shared by injection-detection rules (tuple, not list)
+    DANGEROUS_SINKS: tuple = (
         "exec(", "rawQuery", "execSQL", "loadUrl", "openFile",
         "sendBroadcast", "startActivity",
-    ]
+    )
 
     # Known third-party SDK package prefixes — components from these are
     # legitimately exported by the SDK and should not be flagged as app bugs.

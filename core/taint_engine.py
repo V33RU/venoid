@@ -255,6 +255,8 @@ class TaintEngine:
             ))
             return True
 
+        # Backtracking DFS: append before recursing, pop after — `path` is a
+        # shared mutable list reused across all branches to avoid allocation.
         step = TaintStep(method=sig, instruction="call", line_number=0)
         path.append(step)
 
@@ -273,7 +275,7 @@ class TaintEngine:
             ):
                 found = True
 
-        path.pop()
+        path.pop()  # backtrack — restore path for sibling branches
         return found
 
     def get_paths_to_sink(self, sink_pattern: str) -> List[TaintPath]:

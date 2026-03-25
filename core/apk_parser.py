@@ -64,7 +64,10 @@ class APKParser:
             Minimum SDK version or 0 if not available.
         """
         if self.apk:
-            return self.apk.get_min_sdk_version() or 0
+            try:
+                return int(self.apk.get_min_sdk_version() or 0)
+            except (ValueError, TypeError):
+                return 0
         return 0
 
     def get_target_sdk(self) -> int:
@@ -74,87 +77,60 @@ class APKParser:
             Target SDK version or 0 if not available.
         """
         if self.apk:
-            return self.apk.get_target_sdk_version() or 0
+            try:
+                return int(self.apk.get_target_sdk_version() or 0)
+            except (ValueError, TypeError):
+                return 0
         return 0
 
-    def get_activities(self) -> List[Dict[str, Any]]:
-        """Get all activities from the manifest.
+    def _get_components(self, component_type: str, getter_name: str,
+                        extra_attrs: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Get components of a given type from the manifest.
+
+        Args:
+            component_type: XML tag name (activity, service, receiver, provider).
+            getter_name: Name of the APK method to list components.
+            extra_attrs: Additional manifest attributes to include.
 
         Returns:
-            List of activity definitions with name, exported status, etc.
+            List of component definitions.
         """
-        activities = []
         if not self.apk:
-            return activities
+            return []
 
-        for activity in self.apk.get_activities():
-            attrs = self.get_manifest_element('activity', 'name', activity)
-            activities.append({
-                'name': activity,
-                'exported': self._is_exported('activity', activity),
-                'permission': self.get_manifest_element('activity', 'permission', activity),
-                'intent_filters': self._get_intent_filters('activity', activity),
-            })
-        return activities
+        components = []
+        for name in getattr(self.apk, getter_name)():
+            entry: Dict[str, Any] = {
+                'name': name,
+                'exported': self._is_exported(component_type, name),
+                'permission': self.get_manifest_element(component_type, 'permission', name),
+                'intent_filters': self._get_intent_filters(component_type, name),
+            }
+            for attr in (extra_attrs or []):
+                entry[attr] = self.get_manifest_element(component_type, attr, name)
+            components.append(entry)
+        return components
+
+    def get_activities(self) -> List[Dict[str, Any]]:
+        """Get all activities from the manifest."""
+        return self._get_components('activity', 'get_activities')
 
     def get_services(self) -> List[Dict[str, Any]]:
-        """Get all services from the manifest.
-
-        Returns:
-            List of service definitions.
-        """
-        services = []
-        if not self.apk:
-            return services
-
-        for service in self.apk.get_services():
-            services.append({
-                'name': service,
-                'exported': self._is_exported('service', service),
-                'permission': self.get_manifest_element('service', 'permission', service),
-                'intent_filters': self._get_intent_filters('service', service),
-            })
-        return services
+        """Get all services from the manifest."""
+        return self._get_components('service', 'get_services')
 
     def get_receivers(self) -> List[Dict[str, Any]]:
-        """Get all broadcast receivers from the manifest.
-
-        Returns:
-            List of receiver definitions.
-        """
-        receivers = []
-        if not self.apk:
-            return receivers
-
-        for receiver in self.apk.get_receivers():
-            receivers.append({
-                'name': receiver,
-                'exported': self._is_exported('receiver', receiver),
-                'permission': self.get_manifest_element('receiver', 'permission', receiver),
-                'intent_filters': self._get_intent_filters('receiver', receiver),
-            })
-        return receivers
+        """Get all broadcast receivers from the manifest."""
+        return self._get_components('receiver', 'get_receivers')
 
     def get_providers(self) -> List[Dict[str, Any]]:
-        """Get all content providers from the manifest.
-
-        Returns:
-            List of provider definitions.
-        """
-        providers = []
-        if not self.apk:
-            return providers
-
-        for provider in self.apk.get_providers():
-            providers.append({
-                'name': provider,
-                'exported': self._is_exported('provider', provider),
-                'permission': self.get_manifest_element('provider', 'permission', provider),
-                'read_permission': self.get_manifest_element('provider', 'readPermission', provider),
-                'write_permission': self.get_manifest_element('provider', 'writePermission', provider),
-                'grant_uri_permissions': self.get_manifest_element('provider', 'grantUriPermissions', provider),
-                'authorities': self._get_provider_authorities(provider),
-            })
+        """Get all content providers from the manifest."""
+        providers = self._get_components('provider', 'get_providers', extra_attrs=[
+            'readPermission', 'writePermission', 'grantUriPermissions',
+        ])
+        # Add authorities (needs special handling)
+        for p in providers:
+            p['authorities'] = self._get_provider_authorities(p['name'])
         return providers
 
     def _is_exported(self, component_type: str, name: str) -> bool:
@@ -199,7 +175,7 @@ class APKParser:
         for elem in xml.iter():
             if elem.tag == component_type:
                 elem_name = elem.get(f'{{{ANDROID_NS}}}name')
-                if elem_name == name or elem_name.endswith(name):
+                if elem_name == name or (name.count('.') == 0 and elem_name.endswith(f".{name}")):
                     for intent_filter in elem.findall('.//intent-filter'):
                         auto_verify = intent_filter.get(f'{{{ANDROID_NS}}}autoVerify', 'false')
                         filter_data = {
@@ -315,7 +291,7 @@ class APKParser:
 
         for elem in xml.iter(tag):
             elem_name = elem.get(f'{{{ns}}}name', '')
-            if elem_name == name or elem_name.endswith(name.split('.')[-1]):
+            if elem_name == name or elem_name == f".{name.split('.')[-1]}":
                 return elem.get(f'{{{ns}}}{attribute}')
         return None
 

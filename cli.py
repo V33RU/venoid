@@ -361,7 +361,7 @@ def scan(
             try:
                 all_findings.extend(rule.check())
             except Exception as e:
-                logger.debug(f"Rule {rule.rule_id} error: {e}")
+                logger.warning(f"Rule {rule.rule_id} failed: {e}", exc_info=verbose)
             progress.advance(t3)
         progress.update(t3, description=f"{len(rules)} rules complete")
 
