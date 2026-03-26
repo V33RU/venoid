@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-# Basic scan — produces an HTML report
+# Basic scan - produces an HTML report
 python3 cli.py scan app.apk
 
 # Multiple output formats with exploit hints
@@ -88,7 +88,7 @@ python3 cli.py scan --help
 
 | Format | Description |
 |--------|-------------|
-| `html` | Dark interactive report — findings grouped by vulnerability type, per-component attack commands |
+| `html` | Dark interactive report - findings grouped by vulnerability type, per-component attack commands |
 | `json` | Machine-readable, full finding detail including taint paths and Frida script |
 | `sarif` | SARIF 2.1.0 for GitHub Advanced Security / code scanning upload |
 
@@ -103,8 +103,8 @@ python3 cli.py scan app.apk -e
 ```
 
 Scripts are written to `./frida/<RULE-ID>_<Component>.js` and printed at the end of the scan.
-Each script hooks the exact vulnerable method for that finding — logging arguments, dumping key
-material, confirming bypasses — and can be run directly:
+Each script hooks the exact vulnerable method for that finding - logging arguments, dumping key
+material, confirming bypasses - and can be run directly:
 
 ```bash
 frida -U -n com.example.app -s frida/EXP-002_MainActivity.js
@@ -114,10 +114,10 @@ Coverage: all 38 rules have dedicated templates (EXP-001 through EXP-043).
 
 ## How It Works
 
-1. **APK parsing** — unpacks manifest, resources, and DEX bytecode via androguard
-2. **Call graph** — builds a method-level call graph across all DEX files
-3. **Taint engine** — traces data flow from user-controlled sources (`getIntent`, `getStringExtra`, `getQueryParameter`, …) to dangerous sinks (`loadUrl`, `rawQuery`, `exec`, `startActivity`, …)
-4. **Rules** — each rule queries the call graph, manifest, or taint paths and emits structured findings with CWE, CVSS score, exploit commands, and remediation advice
+1. **APK parsing** - unpacks manifest, resources, and DEX bytecode via androguard
+2. **Call graph** - builds a method-level call graph across all DEX files
+3. **Taint engine** - traces data flow from user-controlled sources (`getIntent`, `getStringExtra`, `getQueryParameter`, …) to dangerous sinks (`loadUrl`, `rawQuery`, `exec`, `startActivity`, …)
+4. **Rules** - each rule queries the call graph, manifest, or taint paths and emits structured findings with CWE, CVSS score, exploit commands, and remediation advice
 
 ## Project Structure
 
