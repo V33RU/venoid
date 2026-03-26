@@ -151,7 +151,8 @@ class TestIsExported:
     def test_auto_exported_with_intent_filter(self):
         """Component with intent-filter but no explicit exported attr is auto-exported."""
         intent_filter = (
-            f'<intent-filter><action {NS}name="android.intent.action.VIEW"/></intent-filter>'
+            '<intent-filter><action xmlns:android="http://schemas.android.com/apk/res/android"'
+            ' android:name="android.intent.action.VIEW"/></intent-filter>'
         )
         xml = _make_manifest(
             ("activity", "com.test.Foo", None, None, [intent_filter]),

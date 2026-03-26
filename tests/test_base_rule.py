@@ -108,8 +108,25 @@ class TestBaseRule:
         assert rule._is_protected(None) is False
         assert rule._is_protected("") is False
         assert rule._is_protected("android.permission.NORMAL") is False
-        assert rule._is_protected("signature") is True
-        assert rule._is_protected("signatureOrSystem") is True
+
+        # Platform signature permissions should be protected
+        assert rule._is_protected("android.permission.BIND_JOB_SERVICE") is True
+
+        # Custom permission declared with signature protectionLevel
+        rule.apk_parser.get_custom_permissions.return_value = [
+            {"name": "com.test.MY_PERM", "protectionLevel": "signature"},
+        ]
+        assert rule._is_protected("com.test.MY_PERM") is True
+
+        # Custom permission declared with normal protectionLevel
+        rule.apk_parser.get_custom_permissions.return_value = [
+            {"name": "com.test.WEAK_PERM", "protectionLevel": "normal"},
+        ]
+        assert rule._is_protected("com.test.WEAK_PERM") is False
+
+        # Undeclared permission — not protected
+        rule.apk_parser.get_custom_permissions.return_value = []
+        assert rule._is_protected("com.test.UNKNOWN_PERM") is False
 
     def test_safe_sdk_int(self):
         assert BaseRule._safe_sdk_int("21") == 21

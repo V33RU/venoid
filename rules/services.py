@@ -14,10 +14,10 @@ class ExportedServiceRule(BaseRule):
     cwe = "CWE-926"
     description = "Service is exported without requiring a permission, allowing any app to bind or start it."
     remediation = "Set android:exported=\"false\" or define a signature-level permission."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/926.html",
         "https://developer.android.com/guide/components/services"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for exported services without permissions."""
@@ -62,10 +62,10 @@ class ServiceIntentInjectionRule(BaseRule):
     cwe = "CWE-20"
     description = "Exported service passes user-controlled intent data to a dangerous sink without validation."
     remediation = "Validate all intent extras before processing. Use explicit intents."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/20.html",
         "https://developer.android.com/guide/components/services"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for taint flow in exported services."""
@@ -76,6 +76,7 @@ class ServiceIntentInjectionRule(BaseRule):
 
         services = self.apk_parser.get_services()
 
+        seen: set = set()
         for service in services:
             if not service['exported']:
                 continue
@@ -85,6 +86,11 @@ class ServiceIntentInjectionRule(BaseRule):
             for sink_pattern in dangerous_sinks:
                 for path in self.taint_engine.get_paths_to_sink(sink_pattern):
                     if service['name'] in path.source or service['name'] in path.sink:
+                        key = (service['name'], sink_pattern)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+
                         exploit_cmds = [
                             f"adb shell am startservice -n {self.apk_parser.get_package_name()}/{service['name']} "
                             f"--es payload 'injected_data'",

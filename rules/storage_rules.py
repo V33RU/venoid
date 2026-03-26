@@ -2,7 +2,7 @@
 
 from typing import List
 
-from .base_rule import BaseRule, Finding, Severity, Confidence
+from .base_rule import BaseRule, Finding, Severity, Confidence, dalvik_to_java
 
 
 class InsecureLoggingRule(BaseRule):
@@ -23,10 +23,10 @@ class InsecureLoggingRule(BaseRule):
         "Use ProGuard/R8 rules to strip logging in release builds. "
         "Never log credentials, tokens, or user PII."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/532.html",
         "https://owasp.org/www-project-mobile-top-10/2016-risks/m2-insecure-data-storage",
-    ]
+    )
 
     # Keywords that indicate a log call may contain sensitive data.
     # These are matched against the calling method's class/method name as a heuristic.
@@ -62,7 +62,7 @@ class InsecureLoggingRule(BaseRule):
                     continue
 
                 findings.append(self.create_finding(
-                    component_name=method_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";"),
+                    component_name=dalvik_to_java(method_sig),
                     confidence=Confidence.POSSIBLE,
                     code_snippet=f"// Suspected sensitive log in: {method_sig}",
                     exploit_commands=[
@@ -98,10 +98,10 @@ class DynamicCodeLoadingRule(BaseRule):
         "Verify the integrity of loaded DEX files with a cryptographic signature "
         "before executing. Never load from external storage or HTTP URLs."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/829.html",
         "https://developer.android.com/training/articles/security-tips#DynamicCode",
-    ]
+    )
 
     _LOADER_PATTERNS = (
         "DexClassLoader",
@@ -132,9 +132,7 @@ class DynamicCodeLoadingRule(BaseRule):
                 )
                 confidence = Confidence.CONFIRMED if external else Confidence.LIKELY
 
-                class_name = (
-                    method_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
-                )
+                class_name = dalvik_to_java(method_sig)
                 findings.append(self.create_finding(
                     component_name=class_name or "Application",
                     confidence=confidence,
@@ -176,10 +174,10 @@ class SecureScreenFlagRule(BaseRule):
         "WindowManager.LayoutParams.FLAG_SECURE) in onCreate() of all activities "
         "that display sensitive data (login, payment, profile)."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/200.html",
         "https://developer.android.com/reference/android/view/WindowManager.LayoutParams#FLAG_SECURE",
-    ]
+    )
 
     _SENSITIVE_ACTIVITY_KEYWORDS = (
         "login", "signin", "signup", "password", "payment", "checkout",

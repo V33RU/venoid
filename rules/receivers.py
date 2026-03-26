@@ -2,7 +2,7 @@
 
 from typing import List
 
-from .base_rule import BaseRule, Finding, Severity, Confidence
+from .base_rule import BaseRule, Finding, Severity, Confidence, dalvik_to_java
 
 
 class ExportedReceiverRule(BaseRule):
@@ -14,10 +14,10 @@ class ExportedReceiverRule(BaseRule):
     cwe = "CWE-925"
     description = "Broadcast receiver is exported without requiring a permission, allowing any app to send broadcasts to it."
     remediation = "Set android:exported=\"false\" or define a signature-level permission."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/925.html",
         "https://developer.android.com/guide/components/broadcasts#security"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for exported receivers without permissions."""
@@ -68,9 +68,9 @@ class DynamicReceiverRule(BaseRule):
     cwe = "CWE-925"
     description = "Dynamically registered receiver may be exported on API 33+ without RECEIVER_NOT_EXPORTED flag."
     remediation = "Use Context.RECEIVER_NOT_EXPORTED flag when registering receivers on API 33+."
-    references = [
-        "https://developer.android.com/about/versions/13/behavior-changes-13#runtime-received-broadcasts"
-    ]
+    references = (
+        "https://developer.android.com/about/versions/13/behavior-changes-13#runtime-received-broadcasts",
+    )
 
     def check(self) -> List[Finding]:
         """Check for dynamic receiver registration issues."""
@@ -105,7 +105,7 @@ class DynamicReceiverRule(BaseRule):
 
             # Collect the full set of strings associated with this call site:
             # the caller signature + its direct callees
-            callees = self.callgraph.get_callees(caller_sig) if hasattr(self.callgraph, "get_callees") else []
+            callees = self.callgraph.get_callees(caller_sig)
             context_strings = [caller_sig] + list(callees)
 
             has_export_flag = any(
@@ -116,10 +116,7 @@ class DynamicReceiverRule(BaseRule):
                 continue
 
             # Derive a human-readable class name for the finding
-            class_name = (
-                caller_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
-                if "->" in caller_sig else caller_sig
-            )
+            class_name = dalvik_to_java(caller_sig)
 
             finding = self.create_finding(
                 component_name=class_name,
@@ -156,10 +153,10 @@ class ReceiverInjectionRule(BaseRule):
     cwe = "CWE-20"
     description = "Exported receiver passes user-controlled broadcast data to a dangerous sink without validation."
     remediation = "Validate all intent extras in onReceive() before processing."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/20.html",
         "https://developer.android.com/guide/components/broadcasts#security"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for taint flow in exported receivers."""
@@ -170,6 +167,7 @@ class ReceiverInjectionRule(BaseRule):
 
         receivers = self.apk_parser.get_receivers()
 
+        seen: set = set()
         for receiver in receivers:
             if not receiver['exported']:
                 continue
@@ -179,6 +177,11 @@ class ReceiverInjectionRule(BaseRule):
             for sink_pattern in dangerous_sinks:
                 for path in self.taint_engine.get_paths_to_sink(sink_pattern):
                     if receiver['name'] in path.source or receiver['name'] in path.sink:
+                        key = (receiver['name'], sink_pattern)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+
                         exploit_cmds = [
                             f"adb shell am broadcast -n {self.apk_parser.get_package_name()}/{receiver['name']} "
                             f"--es cmd 'injected_data'",
@@ -214,10 +217,10 @@ class UnprotectedSendBroadcastRule(BaseRule):
         "Use sendBroadcast(intent, receiverPermission) and declare a signature-level permission. "
         "For intra-app communication use LocalBroadcastManager or an explicit intent instead."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/927.html",
         "https://developer.android.com/guide/components/broadcasts#restricting_broadcasts_with_permissions",
-    ]
+    )
 
     def check(self) -> List[Finding]:
         findings = []
@@ -234,15 +237,12 @@ class UnprotectedSendBroadcastRule(BaseRule):
             seen.add(caller_sig)
 
             # Skip third-party SDK callers
-            class_name = (
-                caller_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
-                if "->" in caller_sig else caller_sig
-            )
+            class_name = dalvik_to_java(caller_sig)
             if self._is_third_party_component(class_name):
                 continue
 
             # Check callees for a permission string being passed (signature-level guard)
-            callees = self.callgraph.get_callees(caller_sig) if hasattr(self.callgraph, "get_callees") else []
+            callees = self.callgraph.get_callees(caller_sig)
             has_permission_arg = any(
                 "permission" in c.lower() or "signature" in c.lower()
                 for c in callees
@@ -296,10 +296,10 @@ class StickyBroadcastRule(BaseRule):
         "receiver, or use a shared data store (ViewModel, database, SharedPreferences) "
         "protected by appropriate access controls."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/925.html",
         "https://developer.android.com/reference/android/content/Context#sendStickyBroadcast(android.content.Intent)",
-    ]
+    )
 
     def check(self) -> List[Finding]:
         findings = []
@@ -314,10 +314,7 @@ class StickyBroadcastRule(BaseRule):
                 continue
             seen.add(caller_sig)
 
-            class_name = (
-                caller_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
-                if "->" in caller_sig else caller_sig
-            )
+            class_name = dalvik_to_java(caller_sig)
             if self._is_third_party_component(class_name):
                 continue
 

@@ -15,10 +15,10 @@ class DeepLinkAutoVerifyRule(BaseRule):
     component_type = "deeplink"
     description = "Intent filter handles custom scheme without android:autoVerify=\"true\", enabling phishing via link hijacking."
     remediation = "Set android:autoVerify=\"true\" for all intent filters handling https:// or use App Links."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/345.html",
         "https://developer.android.com/training/app-links/verify-site-associations"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for deep links without autoVerify."""
@@ -67,10 +67,10 @@ class DeepLinkOpenRedirectRule(BaseRule):
     component_type = "deeplink"
     description = "Deep link parameter flows directly to startActivity() without validation, enabling open redirects."
     remediation = "Validate redirect URLs against an allowlist. Reject arbitrary external redirects."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/601.html",
         "https://developer.android.com/training/app-links/deep-linking"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for open redirect vulnerabilities in deep links."""
@@ -132,10 +132,10 @@ class CustomSchemeHijackingRule(BaseRule):
     component_type = "deeplink"
     description = "App registers custom URL scheme (e.g., myapp://) without verification, allowing other apps to intercept."
     remediation = "Use App Links with autoVerify. Avoid custom schemes for sensitive operations."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/346.html",
         "https://developer.android.com/training/app-links/deep-linking"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for custom scheme vulnerabilities."""

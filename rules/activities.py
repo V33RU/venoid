@@ -2,7 +2,7 @@
 
 from typing import List, Any, Optional
 
-from .base_rule import BaseRule, Finding, Severity, Confidence
+from .base_rule import BaseRule, Finding, Severity, Confidence, dalvik_to_java
 from core.apk_parser import ANDROID_NS
 
 
@@ -15,10 +15,10 @@ class ExportedActivityRule(BaseRule):
     cwe = "CWE-926"
     description = "Activity is exported without requiring a permission, allowing any app to launch it."
     remediation = "Set android:exported=\"false\" or define a signature-level permission."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/926.html",
         "https://developer.android.com/guide/components/activities#Declaring"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for exported activities without permissions."""
@@ -94,10 +94,10 @@ class IntentToWebViewRule(BaseRule):
     component_type = "webview"
     description = "User-controlled intent data flows to WebView.loadUrl(), enabling XSS or open redirects."
     remediation = "Validate and sanitize URL data before loading. Use HTTPS allowlists."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/939.html",
         "https://labs.withsecure.com/publications/webview-security"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for taint from getIntent() to loadUrl()."""
@@ -113,12 +113,7 @@ class IntentToWebViewRule(BaseRule):
             # Extract real class name from dalvik method signature.
             # Androguard full_name format: "Lcom/pkg/Class; methodName (desc)V"  (space-separated)
             # Fallback format:             "Lcom/pkg/Class;->methodName(desc)V"  (arrow-separated)
-            component = path.sink
-            if ';' in component:
-                # Space-separated androguard full_name: take everything before the first ';'
-                component = component.split(';')[0].lstrip('L').replace('/', '.')
-            elif '->' in component:
-                component = component.split('->')[0].lstrip('L').rstrip(';').replace('/', '.')
+            component = dalvik_to_java(path.sink)
 
             exploit_cmds = [
                 f"adb shell am start -n {self.apk_parser.get_package_name()}/{component} --es url 'javascript:alert(1)'",
@@ -147,10 +142,10 @@ class NestedIntentForwardingRule(BaseRule):
     cwe = "CWE-441"
     description = "Activity forwards received intents to other components without validation."
     remediation = "Validate intent data before forwarding. Use explicit intents with FLAG_IMMUTABLE."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/441.html",
         "https://www.promon.io/security-news/strandhogg-2-0"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for intent forwarding patterns."""
@@ -321,10 +316,10 @@ class FragmentInjectionRule(BaseRule):
         "Override isValidFragment() to return false for unknown fragment class names, "
         "or migrate to PreferenceFragmentCompat."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/470.html",
         "https://developer.android.com/reference/android/preference/PreferenceActivity#isValidFragment(java.lang.String)",
-    ]
+    )
 
     def check(self) -> List[Finding]:
         findings = []
@@ -349,7 +344,7 @@ class FragmentInjectionRule(BaseRule):
 
             # Check if this class is an exported activity
             activities = self.apk_parser.get_activities()
-            dalvik_name = class_name.strip("L").replace("/", ".").rstrip(";")
+            dalvik_name = dalvik_to_java(class_name)
             for activity in activities:
                 if activity["name"] == dalvik_name and activity["exported"]:
                     findings.append(self.create_finding(
@@ -387,10 +382,10 @@ class InsecureWebResourceResponseRule(BaseRule):
         "Validate the URL scheme and path in shouldInterceptRequest(). "
         "Only serve files from a known safe directory and reject file:// schemes."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/73.html",
         "https://github.com/OWASP/owasp-mstg/blob/master/Document/0x05h-Testing-Platform-Interaction.md",
-    ]
+    )
 
     def check(self) -> List[Finding]:
         findings = []
@@ -410,7 +405,7 @@ class InsecureWebResourceResponseRule(BaseRule):
             if not reads_file:
                 continue
 
-            class_name = method_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
+            class_name = dalvik_to_java(method_sig)
             findings.append(self.create_finding(
                 component_name=class_name or "WebViewClient",
                 confidence=Confidence.LIKELY,
@@ -457,8 +452,7 @@ class JavaScriptBridgeRule(BaseRule):
 
         for method in bridge_methods:
             # Extract Java class name from signature (supports both -> and space formats)
-            raw = method.split("->")[0] if "->" in method else method.split(";")[0] if ";" in method else method
-            class_name = raw.lstrip("L").rstrip(";").replace("/", ".") or "Application"
+            class_name = dalvik_to_java(method) or "Application"
 
             # Look up whether this class is a directly launchable exported activity
             exported_activities = {a["name"] for a in self.apk_parser.get_activities() if a.get("exported")}
@@ -514,10 +508,10 @@ class WebViewFileAccessRule(BaseRule):
         "setAllowFileAccessFromFileURLs(false). These default to false on API 16+. "
         "Never enable them in production."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/200.html",
         "https://developer.android.com/reference/android/webkit/WebSettings#setAllowUniversalAccessFromFileURLs(boolean)",
-    ]
+    )
 
     def check(self) -> List[Finding]:
         findings = []
@@ -558,10 +552,7 @@ class WebViewFileAccessRule(BaseRule):
                 # so we flag all callers and note that manual verification is needed if
                 # the confidence is LIKELY.
                 seen.add(caller_sig)
-                class_name = (
-                    caller_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
-                    if "->" in caller_sig else caller_sig
-                )
+                class_name = dalvik_to_java(caller_sig)
 
                 # Build exploit commands using the actual class name found in the APK
                 if api_name == "setAllowUniversalAccessFromFileURLs":
@@ -585,10 +576,9 @@ class WebViewFileAccessRule(BaseRule):
                         "x.send();alert(x.responseText)</script>",
                     ]
 
-                # Override severity per-finding since the two APIs have different severities
-                original_severity = self.severity
-                self.severity = severity
-                findings.append(self.create_finding(
+                # Build finding via create_finding then override severity,
+                # avoiding mutation of shared self.severity.
+                finding = self.create_finding(
                     component_name=class_name,
                     confidence=confidence,
                     code_snippet=(
@@ -597,8 +587,12 @@ class WebViewFileAccessRule(BaseRule):
                     exploit_commands=exploit_cmds,
                     exploit_scenario=scenario,
                     api_level_affected="All (defaulted to false since API 16)",
-                ))
-                self.severity = original_severity
+                )
+                finding.severity = severity
+                finding.cvss_score = {
+                    Severity.CRITICAL: 9.0, Severity.HIGH: 7.5,
+                }.get(severity, 5.0)
+                findings.append(finding)
 
         return findings
 
@@ -622,10 +616,10 @@ class IntentRedirectionRule(BaseRule):
         "If forwarding is necessary, use an explicit allowlist of permitted target "
         "components and strip dangerous flags (FLAG_GRANT_READ_URI_PERMISSION etc.)."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/926.html",
         "https://blog.oversecured.com/Android-Intent-Redirection/",
-    ]
+    )
 
     # Sources that extract a nested Intent from an incoming intent
     _NESTED_INTENT_SOURCES = (
@@ -652,9 +646,7 @@ class IntentRedirectionRule(BaseRule):
                     continue
 
                 # Extract class name from dalvik sink signature
-                component = path.sink
-                if "->" in component:
-                    component = component.split("->")[0].lstrip("L").rstrip(";").replace("/", ".")
+                component = dalvik_to_java(path.sink)
 
                 # Only flag if the component is an exported activity or service
                 all_components = (

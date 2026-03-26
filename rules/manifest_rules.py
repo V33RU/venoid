@@ -2,7 +2,7 @@
 
 from typing import List
 
-from .base_rule import BaseRule, Finding, Severity, Confidence
+from .base_rule import BaseRule, Finding, Severity, Confidence, dalvik_to_java
 from core.apk_parser import ANDROID_NS
 
 
@@ -176,7 +176,7 @@ class PendingIntentVulnerabilityRule(BaseRule):
                 continue
             seen.add(caller_sig)
 
-            callees = self.callgraph.get_callees(caller_sig) if hasattr(self.callgraph, "get_callees") else []
+            callees = self.callgraph.get_callees(caller_sig)
             context_strings = [caller_sig] + list(callees)
 
             # If FLAG_IMMUTABLE or FLAG_MUTABLE is explicitly referenced, skip
@@ -187,10 +187,7 @@ class PendingIntentVulnerabilityRule(BaseRule):
             if has_immutable:
                 continue
 
-            class_name = (
-                caller_sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
-                if "->" in caller_sig else caller_sig
-            )
+            class_name = dalvik_to_java(caller_sig)
 
             findings.append(self.create_finding(
                 component_name=class_name,

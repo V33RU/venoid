@@ -6,6 +6,25 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 
 
+def dalvik_to_java(sig: str) -> str:
+    """Convert a Dalvik method signature to a Java class name.
+
+    Handles both arrow-separated (``Lcom/pkg/Class;->method()``) and
+    space-separated (``Lcom/pkg/Class; method ()``) formats produced by
+    androguard.
+
+    Returns:
+        Dotted Java class name (e.g. ``"com.pkg.Class"``).
+    """
+    if "->" in sig:
+        raw = sig.split("->")[0]
+    elif ";" in sig:
+        raw = sig.split(";")[0]
+    else:
+        raw = sig
+    return raw.lstrip("L").rstrip(";").replace("/", ".")
+
+
 class Severity(Enum):
     """Finding severity levels."""
     CRITICAL = "CRITICAL"
@@ -235,14 +254,41 @@ class BaseRule(ABC):
     def _is_protected(self, permission: Optional[str]) -> bool:
         """Check if a permission provides adequate protection.
 
+        Looks up the permission's ``protectionLevel`` in the manifest's
+        ``<permission>`` declarations.  Platform permissions (those starting
+        with ``android.permission.``) that are at signature level are also
+        considered protected.
+
         Args:
-            permission: Permission string.
+            permission: Permission name string.
 
         Returns:
-            True if permission is signature/system level.
+            True if the permission is at signature or system level.
         """
         if not permission:
             return False
 
-        protected_levels = ["signature", "signatureOrSystem", "system"]
-        return any(level in permission.lower() for level in protected_levels)
+        protected_levels = ("signature", "signatureorsystem", "system")
+
+        # Well-known platform signature permissions
+        _PLATFORM_SIGNATURE_PERMS = {
+            "android.permission.BIND_JOB_SERVICE",
+            "android.permission.BIND_ACCESSIBILITY_SERVICE",
+            "android.permission.BIND_AUTOFILL_SERVICE",
+            "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+            "android.permission.BIND_DEVICE_ADMIN",
+            "android.permission.BIND_INPUT_METHOD",
+            "android.permission.BIND_WALLPAPER",
+            "android.permission.BIND_VPN_SERVICE",
+            "android.permission.BIND_REMOTEVIEWS",
+        }
+        if permission in _PLATFORM_SIGNATURE_PERMS:
+            return True
+
+        # Look up custom permission protectionLevel from the manifest
+        for perm in self.apk_parser.get_custom_permissions():
+            if perm.get("name") == permission:
+                level = perm.get("protectionLevel", "normal").lower()
+                return any(pl in level for pl in protected_levels)
+
+        return False

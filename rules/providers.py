@@ -15,10 +15,10 @@ class ExportedProviderRule(BaseRule):
     cwe = "CWE-732"
     description = "Content provider is exported without requiring a permission for both read and write operations."
     remediation = "Set android:exported=\"false\" or define signature-level read/write permissions."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/732.html",
         "https://developer.android.com/guide/topics/providers/content-provider-creating"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for exported providers without full permission protection."""
@@ -30,8 +30,8 @@ class ExportedProviderRule(BaseRule):
                 continue
 
             # Check for partial permissions
-            read_perm = provider.get('read_permission')
-            write_perm = provider.get('write_permission')
+            read_perm = provider.get('readPermission')
+            write_perm = provider.get('writePermission')
             general_perm = provider.get('permission')
 
             # If only read or only write permission is set, it's vulnerable
@@ -70,10 +70,10 @@ class ProviderSQLInjectionRule(BaseRule):
     cwe = "CWE-89"
     description = "Content provider constructs SQL queries using unsanitized user input from selection parameter."
     remediation = "Use parameterized queries or query builder. Never concatenate user input into SQL."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/89.html",
         "https://developer.android.com/guide/topics/providers/content-provider-creating#Implementation"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for SQL injection in provider query methods."""
@@ -84,17 +84,23 @@ class ProviderSQLInjectionRule(BaseRule):
 
         providers = self.apk_parser.get_providers()
 
+        # Check for taint paths from selection parameter to rawQuery/execSQL
+        paths = self.taint_engine.get_paths_to_sink("rawQuery")
+        paths.extend(self.taint_engine.get_paths_to_sink("execSQL"))
+
+        seen: set = set()
         for provider in providers:
             if not provider['exported']:
                 continue
 
-            # Check for taint paths from selection parameter to rawQuery/execSQL
-            paths = self.taint_engine.get_paths_to_sink("rawQuery")
-            paths.extend(self.taint_engine.get_paths_to_sink("execSQL"))
-
             for path in paths:
                 if "query" in path.source.lower() or "selection" in path.source.lower():
                     for authority in provider.get('authorities', []):
+                        key = (provider['name'], authority)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+
                         exploit_cmds = [
                             f"adb shell content query --uri content://{authority}/ "
                             f"--where \"1=1 OR 1=1\"",
@@ -124,10 +130,10 @@ class ProviderPathTraversalRule(BaseRule):
     cwe = "CWE-22"
     description = "Content provider's openFile() method allows path traversal via unsanitized URI path segments."
     remediation = "Validate and sanitize URI paths. Use canonical paths and check against allowed directories."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/22.html",
         "https://developer.android.com/reference/android/content/ContentProvider#openFile(android.net.Uri,%20java.lang.String)"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for path traversal vulnerabilities in provider openFile."""
@@ -138,16 +144,22 @@ class ProviderPathTraversalRule(BaseRule):
 
         providers = self.apk_parser.get_providers()
 
+        # Check for taint paths to openFile
+        paths = self.taint_engine.get_paths_to_sink("openFile")
+
+        seen: set = set()
         for provider in providers:
             if not provider['exported']:
                 continue
 
-            # Check for taint paths to openFile
-            paths = self.taint_engine.get_paths_to_sink("openFile")
-
             for path in paths:
                 if provider['name'] in path.source or provider['name'] in path.sink:
                     for authority in provider.get('authorities', []):
+                        key = (provider['name'], authority)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+
                         exploit_cmds = [
                             f"adb shell content read --uri content://{authority}/../../../etc/passwd",
                             f"adb shell content read --uri content://{authority}/%2F..%2F..%2F..%2Fdata%2Fdata%2F",
@@ -188,10 +200,10 @@ class TypoPermissionRule(BaseRule):
         "Declare the permission with <permission> in AndroidManifest.xml and set "
         "android:protectionLevel=\"signature\". Verify the exact permission string matches."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/732.html",
         "https://developer.android.com/guide/topics/manifest/permission-element",
-    ]
+    )
 
     def check(self) -> List[Finding]:
         findings = []
@@ -205,7 +217,7 @@ class TypoPermissionRule(BaseRule):
             if not provider["exported"]:
                 continue
 
-            for perm_attr in ("permission", "read_permission", "write_permission"):
+            for perm_attr in ("permission", "readPermission", "writePermission"):
                 perm = provider.get(perm_attr)
                 if not perm:
                     continue
@@ -242,10 +254,10 @@ class GrantUriPermissionsRule(BaseRule):
     cwe = "CWE-284"
     description = "Content provider has android:grantUriPermissions=\"true\" allowing any app to access URIs."
     remediation = "Set android:grantUriPermissions=\"false\" or use per-URI grants with explicit permissions."
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/284.html",
         "https://developer.android.com/guide/topics/providers/content-provider-creating#Permissions"
-    ]
+    )
 
     def check(self) -> List[Finding]:
         """Check for global grantUriPermissions."""
@@ -253,7 +265,7 @@ class GrantUriPermissionsRule(BaseRule):
         providers = self.apk_parser.get_providers()
 
         for provider in providers:
-            grant_global = provider.get('grant_uri_permissions')
+            grant_global = provider.get('grantUriPermissions')
             if not grant_global or str(grant_global).lower() != 'true':
                 continue
 
@@ -292,11 +304,11 @@ class FileProviderBroadPathsRule(BaseRule):
         "needs to be shared. Avoid <root-path> entirely. Use <files-path> / "
         "<cache-path> with an explicit subdirectory instead of path=\".\"."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/200.html",
         "https://developer.android.com/reference/androidx/core/content/FileProvider",
         "https://github.com/OWASP/owasp-mstg/blob/master/Document/0x05d-Testing-Data-Storage.md",
-    ]
+    )
 
     # Tags that are inherently dangerous regardless of the path value
     _ALWAYS_DANGEROUS_TAGS = {"root-path", "external-path"}

@@ -3,7 +3,7 @@
 import re
 from typing import List
 
-from .base_rule import BaseRule, Finding, Severity, Confidence
+from .base_rule import BaseRule, Finding, Severity, Confidence, dalvik_to_java
 
 
 class HardcodedCryptoKeyRule(BaseRule):
@@ -144,12 +144,20 @@ class InsecureRandomRule(BaseRule):
         if not self.callgraph:
             return findings
 
-        random_methods = self.callgraph.search_methods("java.util.Random")
-        math_random = self.callgraph.search_methods("Math.random")
+        random_methods = self.callgraph.search_methods("java/util/Random")
+        math_random = self.callgraph.search_methods("Math;->random")
 
+        seen_classes: set = set()
         for method in random_methods + math_random:
+            class_name = dalvik_to_java(method)
+            if not class_name or class_name in seen_classes:
+                continue
+            if self._is_third_party_component(class_name):
+                continue
+            seen_classes.add(class_name)
+
             findings.append(self.create_finding(
-                component_name=method.split("->")[0] if "->" in method else "Application",
+                component_name=class_name,
                 confidence=Confidence.LIKELY,
                 details={
                     "issue": "Insecure random generator used",
@@ -179,10 +187,10 @@ class BrokenTrustManagerRule(BaseRule):
         "Remove the custom TrustManager. Use the default system TrustManager. "
         "If custom CA pinning is needed, use the Network Security Config file instead."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/295.html",
         "https://developer.android.com/training/articles/security-ssl",
-    ]
+    )
 
     def check(self) -> List[Finding]:
         findings = []
@@ -201,15 +209,12 @@ class BrokenTrustManagerRule(BaseRule):
             seen.add(sig)
 
             # Skip third-party SDK implementations
-            class_name = (
-                sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
-                if "->" in sig else sig
-            )
+            class_name = dalvik_to_java(sig)
             if self._is_third_party_component(class_name):
                 continue
 
             # Empty callees → method body makes no verification calls → accepts all certs
-            callees = self.callgraph.get_callees(sig) if hasattr(self.callgraph, "get_callees") else set()
+            callees = self.callgraph.get_callees(sig)
             throws_exception = any(
                 "CertificateException" in c or "checkServerTrusted" in c
                 for c in callees
@@ -263,10 +268,10 @@ class AllowAllHostnameVerifierRule(BaseRule):
         "Remove the custom HostnameVerifier. The default verifier enforces hostname matching. "
         "Never use SSLSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER in production."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/297.html",
         "https://developer.android.com/training/articles/security-ssl",
-    ]
+    )
 
     _ALLOW_ALL_PATTERNS = (
         "ALLOW_ALL_HOSTNAME_VERIFIER",
@@ -289,10 +294,7 @@ class AllowAllHostnameVerifierRule(BaseRule):
                     continue
                 seen.add(sig)
 
-                class_name = (
-                    sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
-                    if "->" in sig else sig
-                )
+                class_name = dalvik_to_java(sig)
                 if self._is_third_party_component(class_name):
                     continue
 
@@ -341,10 +343,10 @@ class WebViewSslErrorIgnoredRule(BaseRule):
         "Call handler.cancel() instead of handler.proceed() in onReceivedSslError(). "
         "If a specific self-signed CA is required, add it via Network Security Config."
     )
-    references = [
+    references = (
         "https://cwe.mitre.org/data/definitions/295.html",
         "https://developer.android.com/reference/android/webkit/WebViewClient#onReceivedSslError",
-    ]
+    )
 
     def check(self) -> List[Finding]:
         findings = []
@@ -361,15 +363,12 @@ class WebViewSslErrorIgnoredRule(BaseRule):
                 continue
             seen.add(sig)
 
-            class_name = (
-                sig.split("->")[0].strip("L").replace("/", ".").rstrip(";")
-                if "->" in sig else sig
-            )
+            class_name = dalvik_to_java(sig)
             if self._is_third_party_component(class_name):
                 continue
 
             # Look for handler.proceed() in callees
-            callees = self.callgraph.get_callees(sig) if hasattr(self.callgraph, "get_callees") else set()
+            callees = self.callgraph.get_callees(sig)
             calls_proceed = any("proceed" in c for c in callees)
             calls_cancel = any("cancel" in c for c in callees)
 

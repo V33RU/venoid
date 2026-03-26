@@ -158,10 +158,11 @@ class TestGetPathsToSink:
             TaintPath(source="A", sink="Lcom/test/Foo;->doRawQuery()V",
                       steps=[], sink_api=""),
         ]
+        # "rawQuery" is a substring of "doRawQuery", so it should match via sink field
         result = engine.get_paths_to_sink("rawQuery")
-        # Should match via sink field even when sink_api is empty
-        assert len(result) == 0  # "rawQuery" not in "doRawQuery" — wait, it is
-        # "rawQuery" IS in "doRawQuery", so this should match
+        assert len(result) == 0  # lowercase "rawQuery" not in "doRawQuery" (case-sensitive)
+
+        # "RawQuery" IS in "doRawQuery" — case-sensitive substring match
         result = engine.get_paths_to_sink("RawQuery")
         assert len(result) == 1
 
