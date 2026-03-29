@@ -1,11 +1,11 @@
-# ExPoser
+# VENOID
 
 Android APK static security analyzer. Detects exported component vulnerabilities, tracks taint flows from sources to sinks, and generates ready-to-run exploit hints.
 
 ## Install
 
 ```bash
-git clone https://github.com/yourorg/exposer.git
+git clone https://github.com/V33RU/exposer.git
 cd exposer
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
