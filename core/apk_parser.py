@@ -331,7 +331,7 @@ class APKParser:
                     if resource_val.startswith("@xml/"):
                         resource_file = "res/xml/" + resource_val[len("@xml/"):] + ".xml"
                     elif resource_val.startswith("@"):
-                        # Compiled resource — try common names below
+                        # Compiled resource - try common names below
                         pass
             break
 
