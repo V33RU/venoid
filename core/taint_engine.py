@@ -242,7 +242,7 @@ class TaintEngine:
             return False
         visited.add(sig)
 
-        # Reached a sink — record the complete path.
+        # Reached a sink - record the complete path.
         if sig in targets:
             step = TaintStep(method=sig, instruction="sink", line_number=0)
             full_path = path + [step]
@@ -255,7 +255,7 @@ class TaintEngine:
             ))
             return True
 
-        # Backtracking DFS: append before recursing, pop after — `path` is a
+        # Backtracking DFS: append before recursing, pop after - `path` is a
         # shared mutable list reused across all branches to avoid allocation.
         step = TaintStep(method=sig, instruction="call", line_number=0)
         path.append(step)
@@ -263,7 +263,7 @@ class TaintEngine:
         found = False
         for xref in current.get_xref_to():
             _, target_method, _ = xref
-            # Skip external (SDK) methods — avoid traversing SDK internals.
+            # Skip external (SDK) methods - avoid traversing SDK internals.
             try:
                 if target_method.is_external():
                     continue
@@ -275,7 +275,7 @@ class TaintEngine:
             ):
                 found = True
 
-        path.pop()  # backtrack — restore path for sibling branches
+        path.pop()  # backtrack - restore path for sibling branches
         return found
 
     def get_paths_to_sink(self, sink_pattern: str) -> List[TaintPath]:
