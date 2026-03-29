@@ -28,7 +28,7 @@ class ExportedReceiverRule(BaseRule):
             if not receiver['exported']:
                 continue
 
-            # Skip known third-party SDK receivers — they are legitimately exported
+            # Skip known third-party SDK receivers - they are legitimately exported
             if self._is_third_party_component(receiver['name']):
                 continue
 
@@ -90,7 +90,7 @@ class DynamicReceiverRule(BaseRule):
         if not self.callgraph:
             return findings
 
-        # Find callers of registerReceiver — these are the methods that register a receiver.
+        # Find callers of registerReceiver - these are the methods that register a receiver.
         # For each caller, check whether it (or any of its callees) reference the
         # RECEIVER_NOT_EXPORTED / RECEIVER_EXPORTED constant.  The constant is accessed as
         # a field read of android.content.Context, so we look for it in the caller's own
@@ -127,7 +127,7 @@ class DynamicReceiverRule(BaseRule):
                     "// Fix: context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);"
                 ),
                 exploit_commands=[
-                    "# Dynamic receiver — determine the registered action at runtime (e.g. via Frida or logcat)",
+                    "# Dynamic receiver - determine the registered action at runtime (e.g. via Frida or logcat)",
                     "# Then broadcast with: adb shell am broadcast -a <action> --receiver-include-background",
                     "# Example if action is known:",
                     "# adb shell am broadcast -a com.example.CUSTOM_ACTION --receiver-include-background",
@@ -253,9 +253,9 @@ class UnprotectedSendBroadcastRule(BaseRule):
                 component_name=class_name or "Application",
                 confidence=confidence,
                 code_snippet=(
-                    "// Unprotected — any app can receive this:\n"
+                    "// Unprotected - any app can receive this:\n"
                     "sendBroadcast(intent);\n\n"
-                    "// Fix — restrict to apps holding this permission:\n"
+                    "// Fix - restrict to apps holding this permission:\n"
                     "sendBroadcast(intent, \"com.example.RECEIVE_BROADCAST\");"
                 ),
                 exploit_commands=[
@@ -331,12 +331,12 @@ class StickyBroadcastRule(BaseRule):
                     "# Retrieve last sticky broadcast value from any app (no permission needed):",
                     "# Intent data = context.registerReceiver(null, new IntentFilter(\"<observed_action>\"));",
                     "# Log.d(\"steal\", data.getStringExtra(\"token\"));",
-                    "# Or via adb with a test app — no special permission required",
+                    "# Or via adb with a test app - no special permission required",
                 ],
                 exploit_scenario=(
                     f"{class_name} sends a sticky broadcast. An attacker app can call "
-                    "registerReceiver(null, intentFilter) at any time — even after the "
-                    "broadcast was sent — and retrieve all extras from the last sticky intent."
+                    "registerReceiver(null, intentFilter) at any time - even after the "
+                    "broadcast was sent - and retrieve all extras from the last sticky intent."
                 ),
                 api_level_affected="All (deprecated since API 21)",
             ))
