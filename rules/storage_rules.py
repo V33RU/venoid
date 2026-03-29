@@ -160,7 +160,7 @@ class SecureScreenFlagRule(BaseRule):
     """Detect activities missing FLAG_SECURE (application backgrounding / screenshot) - CWE-200."""
 
     rule_id = "EXP-035"
-    title = "Missing FLAG_SECURE — Screen Capture / Backgrounding Risk"
+    title = "Missing FLAG_SECURE - Screen Capture / Backgrounding Risk"
     severity = Severity.LOW
     cwe = "CWE-200"
     component_type = "activity"
