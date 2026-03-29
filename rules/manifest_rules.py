@@ -63,7 +63,7 @@ class DebugModeEnabledRule(BaseRule):
         """Check for debuggable flag in manifest.
 
         Note: Only checks android:debuggable in the manifest. Log.d presence
-        is NOT flagged — it appears in virtually every app (including SDK code)
+        is NOT flagged - it appears in virtually every app (including SDK code)
         and produces near-100% false positive rates with no actionable signal.
         """
         findings = []
@@ -118,7 +118,7 @@ class BackupEnabledRule(BaseRule):
         elif allow_backup is None:
             confidence = Confidence.POSSIBLE
         else:
-            confidence = None  # explicitly "false" — safe
+            confidence = None  # explicitly "false" - safe
 
         if confidence is not None:
             findings.append(self.create_finding(
@@ -154,7 +154,7 @@ class PendingIntentVulnerabilityRule(BaseRule):
 
         Strategy: for each method that calls PendingIntent.get*, check whether
         FLAG_IMMUTABLE or FLAG_MUTABLE appears anywhere in the same method's
-        callees.  FLAG_IMMUTABLE = 0x04000000 — it shows up as a field reference
+        callees.  FLAG_IMMUTABLE = 0x04000000 - it shows up as a field reference
         to android.app.PendingIntent.FLAG_IMMUTABLE in the bytecode.  If neither
         flag is found, the PendingIntent is likely mutable (required to be explicit
         on API 31+).
@@ -165,7 +165,7 @@ class PendingIntentVulnerabilityRule(BaseRule):
             return findings
 
         target_sdk = self._safe_sdk_int(self.apk_parser.get_target_sdk())
-        # On API 31+ FLAG_IMMUTABLE is mandatory — raise severity to HIGH, else MEDIUM
+        # On API 31+ FLAG_IMMUTABLE is mandatory - raise severity to HIGH, else MEDIUM
         base_confidence = Confidence.LIKELY if target_sdk >= 31 else Confidence.POSSIBLE
 
         callers = self.callgraph.search_methods("PendingIntent;->get")
