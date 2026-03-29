@@ -124,7 +124,7 @@ class TestBaseRule:
         ]
         assert rule._is_protected("com.test.WEAK_PERM") is False
 
-        # Undeclared permission — not protected
+        # Undeclared permission - not protected
         rule.apk_parser.get_custom_permissions.return_value = []
         assert rule._is_protected("com.test.UNKNOWN_PERM") is False
 
