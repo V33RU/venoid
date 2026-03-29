@@ -28,7 +28,7 @@ class ExportedServiceRule(BaseRule):
             if not service['exported']:
                 continue
 
-            # Skip known third-party SDK services — they are legitimately exported
+            # Skip known third-party SDK services - they are legitimately exported
             if self._is_third_party_component(service['name']):
                 continue
 
