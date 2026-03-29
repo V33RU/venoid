@@ -343,12 +343,12 @@ class FileProviderBroadPathsRule(BaseRule):
             paths_xml = self.apk_parser.get_file_provider_paths(name)
             if not paths_xml:
                 if is_exported:
-                    # Can't read paths XML but it's exported — flag as POSSIBLE
+                    # Can't read paths XML but it's exported - flag as POSSIBLE
                     for authority in provider.get("authorities", []):
                         findings.append(self.create_finding(
                             component_name=f"{name} ({authority})",
                             confidence=Confidence.POSSIBLE,
-                            code_snippet="<!-- Unable to read file_paths.xml from APK — review manually -->",
+                            code_snippet="<!-- Unable to read file_paths.xml from APK - review manually -->",
                             exploit_commands=[
                                 f"# Decode APK and inspect res/xml/file_paths.xml",
                                 f"apktool d app.apk -o app_decoded",
