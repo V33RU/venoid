@@ -63,14 +63,11 @@ from rules.manifest_rules import (
 from rules.crypto_rules import HardcodedCryptoKeyRule, InsecureRandomRule, BrokenTrustManagerRule, AllowAllHostnameVerifierRule, WebViewSslErrorIgnoredRule
 from rules.storage_rules import InsecureLoggingRule, DynamicCodeLoadingRule, SecureScreenFlagRule
 from rules.root_detection import FileBasedRootDetectionRule, APIBasedRootDetectionRule, NativeRootDetectionRule
+from rules.network_rules import URLEndpointExtractionRule, CertificatePinningDetectionRule, APIKeyLeakageRule, CleartextTrafficPatternRule
 
 from exploit.hint_generator import ExploitHintGenerator
 from exploit.scenario_builder import ScenarioBuilder
 from exploit.frida_scripts import FridaScriptGenerator
-
-from report.html_report import HTMLReportGenerator
-from report.json_report import JSONReportGenerator
-from report.sarif_report import SARIFReportGenerator
 
 console = Console()
 
@@ -125,6 +122,10 @@ _ALL_RULE_CLASSES = [
     ("security",   FileBasedRootDetectionRule),
     ("security",   APIBasedRootDetectionRule),
     ("security",   NativeRootDetectionRule),
+    ("network",    URLEndpointExtractionRule),
+    ("network",    CertificatePinningDetectionRule),
+    ("network",    APIKeyLeakageRule),
+    ("network",    CleartextTrafficPatternRule),
 ]
 
 
@@ -185,7 +186,7 @@ def get_all_rules(apk_parser, callgraph, taint_engine, components: Optional[str]
     active = {c.strip().lower() for c in components.split(',')} if components else None
 
     # manifest/crypto/storage/security rules always run when no filter is set
-    always_run = {"manifest", "crypto", "storage", "security"}
+    always_run = {"manifest", "crypto", "storage", "security", "network"}
 
     rules = []
     for category, cls in _ALL_RULE_CLASSES:
@@ -218,7 +219,7 @@ def cli() -> None:
 
 @cli.command(name="rules")
 @click.option('--category', '-c', default=None,
-              help='Filter by category (activities, services, receivers, providers, deeplinks, manifest, crypto, storage, security).')
+              help='Filter by category (activities, services, receivers, providers, deeplinks, manifest, crypto, storage, security, network).')
 def list_rules(category: Optional[str]) -> None:
     """List all available detection rules.
 
@@ -262,9 +263,9 @@ def list_rules(category: Optional[str]) -> None:
 @cli.command()
 @click.argument('apk_path', type=click.Path(exists=True, path_type=Path),
                 metavar='APK_PATH')
-@click.option('--output', '-o', multiple=True, default=['html'],
-              type=click.Choice(['html', 'json', 'sarif'], case_sensitive=False),
-              help='Report format(s). Repeatable: -o html -o json -o sarif  [default: html]')
+@click.option('--output', '-o', multiple=True, default=['json'],
+              type=click.Choice(['json'], case_sensitive=False),
+              help='Report format(s).  [default: json]')
 @click.option('--severity', '-s', default='MEDIUM,HIGH,CRITICAL',
               help='Comma-separated severity filter.  [default: MEDIUM,HIGH,CRITICAL]',
               metavar='LEVELS')
@@ -276,12 +277,12 @@ def list_rules(category: Optional[str]) -> None:
 @click.option('--components', '-t', default=None,
               metavar='TYPES',
               help='Limit scan to component types (comma-separated).\n'
-                   'Choices: activities, services, receivers, providers, deeplinks, security\n'
+                   'Choices: activities, services, receivers, providers, deeplinks, security, network\n'
                    'Default: all')
 @click.option('--exploit-hints', '-e', is_flag=True,
               help='Attach ADB / Frida / drozer commands to each finding.')
-@click.option('--open', '-O', 'open_report', is_flag=True,
-              help='Auto-open the HTML report in browser after scan.')
+@click.option('--open', '-O', 'open_report', is_flag=True, hidden=True,
+              help='(Deprecated) Auto-open report in browser.')
 @click.option('--show-findings', '-f', is_flag=True,
               help='Print a findings table directly in the terminal.')
 @click.option('--jadx-path', default='jadx',
@@ -419,17 +420,31 @@ def scan(
         for fmt in output:
             out_file = output_dir / f"venoid_report_{package_name}.{fmt}"
             try:
-                if fmt == 'html':
-                    HTMLReportGenerator(package_name).save(filtered, str(out_file))
-                elif fmt == 'json':
-                    data = JSONReportGenerator(package_name).generate(filtered)
+                if fmt == 'json':
+                    data = {
+                        "package": package_name,
+                        "apk": str(apk_path),
+                        "total_findings": len(filtered),
+                        "findings": [
+                            {
+                                "rule_id": f.rule_id,
+                                "title": f.title,
+                                "severity": f.severity.value,
+                                "confidence": f.confidence.value,
+                                "component": f.component_name,
+                                "cwe": f.cwe,
+                                "description": f.description,
+                                "details": f.details,
+                                "exploit_commands": f.exploit_commands,
+                            }
+                            for f in filtered
+                        ],
+                    }
                     if exploit_data:
                         data['exploit_hints'] = exploit_data
                     if scenario_data:
                         data['scenarios'] = scenario_data
-                    out_file.write_text(json.dumps(data, indent=2), encoding='utf-8')
-                elif fmt == 'sarif':
-                    SARIFReportGenerator(package_name).save(filtered, str(out_file))
+                    out_file.write_text(json.dumps(data, indent=2, default=str), encoding='utf-8')
                 saved.append(out_file)
             except Exception as e:
                 logger.error(f"Report {fmt} failed: {e}")
