@@ -44,30 +44,17 @@ from core.taint_engine import TaintEngine
 
 from rules.base_rule import Finding, Severity, Confidence
 from rules.activities import (
-    ExportedActivityRule, IntentToWebViewRule, NestedIntentForwardingRule,
-    TaskHijackingRule, TapjackingVulnerabilityRule, JavaScriptBridgeRule,
-    FragmentInjectionRule, InsecureWebResourceResponseRule,
-    WebViewFileAccessRule, IntentRedirectionRule,
+    ExportedActivityRule, IntentToWebViewRule,
+    JavaScriptBridgeRule, WebViewFileAccessRule,
 )
-from rules.services import ExportedServiceRule, ServiceIntentInjectionRule
-from rules.receivers import ExportedReceiverRule, DynamicReceiverRule, ReceiverInjectionRule, UnprotectedSendBroadcastRule, StickyBroadcastRule
-from rules.providers import (
-    ExportedProviderRule, ProviderSQLInjectionRule, ProviderPathTraversalRule,
-    GrantUriPermissionsRule, TypoPermissionRule, FileProviderBroadPathsRule,
-)
-from rules.deeplinks import DeepLinkAutoVerifyRule, DeepLinkOpenRedirectRule, CustomSchemeHijackingRule
-from rules.manifest_rules import (
-    InsecureNetworkConfigRule, DebugModeEnabledRule,
-    BackupEnabledRule, PendingIntentVulnerabilityRule
-)
-from rules.crypto_rules import HardcodedCryptoKeyRule, InsecureRandomRule, BrokenTrustManagerRule, AllowAllHostnameVerifierRule, WebViewSslErrorIgnoredRule
-from rules.storage_rules import InsecureLoggingRule, DynamicCodeLoadingRule, SecureScreenFlagRule
-from rules.root_detection import FileBasedRootDetectionRule, APIBasedRootDetectionRule, NativeRootDetectionRule
-from rules.network_rules import URLEndpointExtractionRule, CertificatePinningDetectionRule, APIKeyLeakageRule, CleartextTrafficPatternRule
-
-from exploit.hint_generator import ExploitHintGenerator
-from exploit.scenario_builder import ScenarioBuilder
-from exploit.frida_scripts import FridaScriptGenerator
+from rules.services import ExportedServiceRule
+from rules.receivers import ExportedReceiverRule, DynamicReceiverRule, UnprotectedSendBroadcastRule
+from rules.providers import ExportedProviderRule, GrantUriPermissionsRule
+from rules.deeplinks import DeepLinkAutoVerifyRule
+from rules.manifest_rules import InsecureNetworkConfigRule, DebugModeEnabledRule, BackupEnabledRule
+from rules.crypto_rules import HardcodedCryptoKeyRule, InsecureRandomRule
+from rules.storage_rules import InsecureLoggingRule, SecureScreenFlagRule
+from rules.network_rules import APIKeyLeakageRule, CleartextTrafficPatternRule
 
 console = Console()
 
@@ -80,53 +67,41 @@ _SEV_COLOR = {
 }
 
 # All rule classes with their category, used by both `scan` and `rules` commands
+# Pro-only rules (taint-based, bypass patterns, advanced analysis) are available in Venoid Pro.
 _ALL_RULE_CLASSES = [
+    # Activities — basic exported component + WebView checks
     ("activities", ExportedActivityRule),
     ("activities", IntentToWebViewRule),
-    ("activities", NestedIntentForwardingRule),
-    ("activities", TaskHijackingRule),
-    ("activities", TapjackingVulnerabilityRule),
     ("activities", JavaScriptBridgeRule),
-    ("activities", FragmentInjectionRule),
-    ("activities", InsecureWebResourceResponseRule),
     ("activities", WebViewFileAccessRule),
-    ("activities", IntentRedirectionRule),
+    # Services
     ("services",   ExportedServiceRule),
-    ("services",   ServiceIntentInjectionRule),
+    # Receivers
     ("receivers",  ExportedReceiverRule),
     ("receivers",  DynamicReceiverRule),
-    ("receivers",  ReceiverInjectionRule),
     ("receivers",  UnprotectedSendBroadcastRule),
-    ("receivers",  StickyBroadcastRule),
+    # Providers
     ("providers",  ExportedProviderRule),
-    ("providers",  ProviderSQLInjectionRule),
-    ("providers",  ProviderPathTraversalRule),
     ("providers",  GrantUriPermissionsRule),
-    ("providers",  TypoPermissionRule),
-    ("providers",  FileProviderBroadPathsRule),
+    # Deep links
     ("deeplinks",  DeepLinkAutoVerifyRule),
-    ("deeplinks",  DeepLinkOpenRedirectRule),
-    ("deeplinks",  CustomSchemeHijackingRule),
+    # Manifest
     ("manifest",   InsecureNetworkConfigRule),
     ("manifest",   DebugModeEnabledRule),
     ("manifest",   BackupEnabledRule),
-    ("manifest",   PendingIntentVulnerabilityRule),
+    # Crypto
     ("crypto",     HardcodedCryptoKeyRule),
     ("crypto",     InsecureRandomRule),
-    ("crypto",     BrokenTrustManagerRule),
-    ("crypto",     AllowAllHostnameVerifierRule),
-    ("crypto",     WebViewSslErrorIgnoredRule),
+    # Storage
     ("storage",    InsecureLoggingRule),
-    ("storage",    DynamicCodeLoadingRule),
     ("storage",    SecureScreenFlagRule),
-    ("security",   FileBasedRootDetectionRule),
-    ("security",   APIBasedRootDetectionRule),
-    ("security",   NativeRootDetectionRule),
-    ("network",    URLEndpointExtractionRule),
-    ("network",    CertificatePinningDetectionRule),
+    # Network
     ("network",    APIKeyLeakageRule),
     ("network",    CleartextTrafficPatternRule),
 ]
+
+# Rules available only in Venoid Pro — shown in upgrade notice
+_PRO_RULE_COUNT = 32
 
 
 BANNER = (
@@ -185,8 +160,8 @@ def get_all_rules(apk_parser, callgraph, taint_engine, components: Optional[str]
     """Get rule instances, optionally filtered by component type."""
     active = {c.strip().lower() for c in components.split(',')} if components else None
 
-    # manifest/crypto/storage/security rules always run when no filter is set
-    always_run = {"manifest", "crypto", "storage", "security", "network"}
+    # these categories always run when no component-type filter is active
+    always_run = {"manifest", "crypto", "storage", "network"}
 
     rules = []
     for category, cls in _ALL_RULE_CLASSES:
@@ -277,10 +252,9 @@ def list_rules(category: Optional[str]) -> None:
 @click.option('--components', '-t', default=None,
               metavar='TYPES',
               help='Limit scan to component types (comma-separated).\n'
-                   'Choices: activities, services, receivers, providers, deeplinks, security, network\n'
+                   'Choices: activities, services, receivers, providers, deeplinks, '
+                   'manifest, crypto, storage, network\n'
                    'Default: all')
-@click.option('--exploit-hints', '-e', is_flag=True,
-              help='Attach ADB / Frida / drozer commands to each finding.')
 @click.option('--open', '-O', 'open_report', is_flag=True, hidden=True,
               help='(Deprecated) Auto-open report in browser.')
 @click.option('--show-findings', '-f', is_flag=True,
@@ -299,7 +273,6 @@ def scan(
     scan_all: bool,
     min_confidence: str,
     components: Optional[str],
-    exploit_hints: bool,
     open_report: bool,
     show_findings: bool,
     jadx_path: str,
@@ -315,6 +288,7 @@ def scan(
       python3 cli.py scan app.apk -o html -o json -e -s CRITICAL,HIGH
       python3 cli.py scan app.apk -t activities,deeplinks -c POSSIBLE -d ./reports
       python3 cli.py scan app.apk --show-findings
+      python3 cli.py scan app.apk --tui
     """
     _silence_libs(verbose)
     logger = logging.getLogger(__name__)
@@ -345,7 +319,6 @@ def scan(
     callgraph = None
     taint_engine = None
     all_findings: List[Finding] = []
-    written_scripts: List[Path] = []
 
     with progress:
         # Phase 1 - Load APK
@@ -391,29 +364,6 @@ def scan(
             and confidence_order.get(f.confidence, 3) <= min_conf_level
         ]
 
-        # Exploit hints + Frida scripts
-        exploit_data = None
-        scenario_data = None
-        if exploit_hints and filtered:
-            hint_gen = ExploitHintGenerator(package_name)
-            exploit_data = hint_gen.generate_all_hints(filtered)
-            scenario_data = ScenarioBuilder(package_name).build_all_scenarios(filtered)
-
-            # Write one .js file per finding into output_dir/frida/
-            frida_gen = FridaScriptGenerator(package_name)
-            frida_dir = output_dir / "frida"
-            frida_dir.mkdir(parents=True, exist_ok=True)
-            seen_scripts: set = set()
-            for finding in filtered:
-                short = finding.component_name.replace("/", ".").split(".")[-1].replace(";", "")[:40]
-                js_name = f"{finding.rule_id}_{short}.js"
-                if js_name in seen_scripts:
-                    continue
-                seen_scripts.add(js_name)
-                js_path = frida_dir / js_name
-                js_path.write_text(frida_gen.generate(finding), encoding="utf-8")
-                written_scripts.append(js_path)
-
         # Write reports
         saved: List[Path] = []
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -440,10 +390,6 @@ def scan(
                             for f in filtered
                         ],
                     }
-                    if exploit_data:
-                        data['exploit_hints'] = exploit_data
-                    if scenario_data:
-                        data['scenarios'] = scenario_data
                     out_file.write_text(json.dumps(data, indent=2, default=str), encoding='utf-8')
                 saved.append(out_file)
             except Exception as e:
@@ -546,25 +492,36 @@ def scan(
             t.append(str(path), style=f"cyan link file://{path.resolve()}")
             console.print(t)
 
-    # ── Frida scripts ──────────────────────────────────────────────────────────
-    if exploit_hints and filtered and written_scripts:
-        console.print()
-        console.print(Rule("[dim]Frida Scripts[/dim]", style="dim"))
-        for js_path in written_scripts:
-            t = Text("  ✓ ", style="green")
-            t.append(str(js_path), style=f"cyan link file://{js_path.resolve()}")
-            console.print(t)
-        pkg_hint = package_name
-        console.print(
-            f"\n[dim]  Run: [cyan]frida -U -n {pkg_hint} -s <script>.js[/cyan][/dim]"
-        )
-
     # ── Auto-open HTML report ──────────────────────────────────────────────────
     if open_report:
         for path in saved:
             if str(path).endswith('.html'):
                 _open_in_browser(path)
                 console.print(f"[dim]  Opened {path.name} in browser.[/dim]")
+
+    # ── Interactive TUI ────────────────────────────────────────────────────────
+    if launch_tui:
+        if not filtered:
+            console.print("\n[yellow]No findings to browse in TUI.[/yellow]")
+        else:
+            console.print(f"\n[dim]Launching TUI with {len(filtered)} finding(s)…[/dim]")
+            try:
+                from tui import VenoidTUI
+                app = VenoidTUI(filtered, package_name)
+                app.run()
+            except ImportError:
+                console.print("[red]✗ textual not installed. Run: pip install textual>=0.70.0[/red]")
+        return
+
+    # ── Upgrade notice ────────────────────────────────────────────────────────
+    console.print()
+    console.print(Panel(
+        f"[dim]{_PRO_RULE_COUNT} additional rules + Frida scripts, exploit hints, attack scenarios & web UI[/dim]\n"
+        "[bold cyan]→ Upgrade to Venoid Pro[/bold cyan]",
+        title="[dim]Venoid Pro[/dim]",
+        border_style="dim cyan",
+        padding=(0, 2),
+    ))
 
     # ── Critical warning ───────────────────────────────────────────────────────
     critical_count = sev_counts.get(Severity.CRITICAL, 0)
