@@ -115,7 +115,7 @@ cli.py        Entry point
 
 Venoid Pro is a web-based version with 32 additional rules and advanced features:
 
-- **52 total rules** — includes taint-based, SSL bypass, root detection bypass, native code, obfuscation, and permission over-privilege analysis
+- **52 total rules** — includes taint-based, SSL bypass, advanced root detection bypass, native code, obfuscation, and permission over-privilege analysis
 - **Frida script generation** — auto-generates runnable `.js` hooks per finding
 - **Full exploit hints** — intent fuzzing, drozer commands, manual steps, payloads
 - **Attack scenarios** — attacker profile, impact analysis, CVE references
