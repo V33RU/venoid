@@ -284,11 +284,10 @@ def scan(
     \b
     Examples:
       python3 cli.py scan app.apk
-      python3 cli.py scan app.apk --all --open
-      python3 cli.py scan app.apk -o html -o json -e -s CRITICAL,HIGH
+      python3 cli.py scan app.apk --all
+      python3 cli.py scan app.apk -s CRITICAL,HIGH
       python3 cli.py scan app.apk -t activities,deeplinks -c POSSIBLE -d ./reports
       python3 cli.py scan app.apk --show-findings
-      python3 cli.py scan app.apk --tui
     """
     _silence_libs(verbose)
     logger = logging.getLogger(__name__)
@@ -498,20 +497,6 @@ def scan(
             if str(path).endswith('.html'):
                 _open_in_browser(path)
                 console.print(f"[dim]  Opened {path.name} in browser.[/dim]")
-
-    # ── Interactive TUI ────────────────────────────────────────────────────────
-    if launch_tui:
-        if not filtered:
-            console.print("\n[yellow]No findings to browse in TUI.[/yellow]")
-        else:
-            console.print(f"\n[dim]Launching TUI with {len(filtered)} finding(s)…[/dim]")
-            try:
-                from tui import VenoidTUI
-                app = VenoidTUI(filtered, package_name)
-                app.run()
-            except ImportError:
-                console.print("[red]✗ textual not installed. Run: pip install textual>=0.70.0[/red]")
-        return
 
     # ── Upgrade notice ────────────────────────────────────────────────────────
     console.print()
